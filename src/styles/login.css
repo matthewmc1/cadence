@@ -1,0 +1,123 @@
+.login {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 24px;
+}
+.login__panel {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 30px 80px -40px rgba(33, 30, 24, 0.4);
+  padding: 40px 38px 36px;
+  animation: stage-in 0.5s var(--ease);
+}
+.login__brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 26px;
+}
+.login__lead {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.login__sub {
+  font-size: 14px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin: 8px 0 22px;
+}
+.login__sub strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.login__form {
+  display: flex;
+  flex-direction: column;
+}
+.login__input {
+  font-size: 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  padding: 13px 18px;
+  background: var(--paper);
+  color: var(--ink);
+  outline: none;
+  transition: border-color var(--dur) var(--ease);
+}
+.login__input:focus {
+  border-color: var(--accent);
+}
+.login__btn {
+  margin-top: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: none;
+  padding: 14px;
+  border-radius: var(--r-pill);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.login__btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px -14px rgba(33, 30, 24, 0.5);
+}
+.login__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.login__fine {
+  font-size: 12px;
+  color: var(--ink-5);
+  margin: 16px 0 0;
+  text-align: center;
+}
+.login__sent {
+  display: flex;
+  flex-direction: column;
+}
+.login__devlink {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--accent);
+  padding: 11px 18px;
+  border-radius: var(--r-pill);
+  margin-top: 4px;
+  transition: transform var(--dur) var(--ease);
+}
+.login__devlink:hover {
+  transform: translateY(-1px);
+}
+.login__again {
+  align-self: flex-start;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--ink-3);
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.login__again:hover {
+  color: var(--ink);
+}
+.login__foot {
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-4);
+}

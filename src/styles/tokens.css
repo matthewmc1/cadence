@@ -1,0 +1,83 @@
+/* ============================================================
+   Cadence — design tokens
+   Palette, type and elevation lifted directly from the
+   Cadence.dc.html design canvas. Warm paper + ink, with a
+   terracotta accent, sage "protected" green and slate-blue admin.
+   ============================================================ */
+:root {
+  /* — surfaces (warm paper, lightest → deepest) — */
+  --paper:        #FCFBF7; /* cards / raised */
+  --paper-2:      #FBFAF5; /* secondary card */
+  --surface:      #F4F1EA; /* the screen itself */
+  --surface-rail: #FAF8F2; /* rails / wells */
+  --canvas:       #E9E6DE; /* app backdrop */
+  --sunken:       #FAF8F2; /* done / inset */
+
+  /* — fills (chips, tracks, subtle blocks) — */
+  --fill:         #EFEBE0;
+  --fill-2:       #EDE8DC;
+  --fill-warm:    #F2E4D4; /* terracotta-tinted chip */
+  --fill-admin:   #E8EDF1; /* slate-tinted chip */
+  --fill-sage:    #E9EDE5;
+  --track:        #E6E0D4; /* progress track */
+
+  /* — ink (text, strongest → faintest) — */
+  --ink:          #211E18;
+  --ink-soft:     #2C2922;
+  --ink-2:        #5F584C;
+  --ink-3:        #6E685C; /* darkened for WCAG AA on paper */
+  --ink-4:        #837B6C; /* darkened for contrast */
+  --ink-5:        #8A8173; /* darkened for contrast */
+  --ink-label:    #948A77; /* uppercase eyebrows — darkened for contrast */
+  --ink-strike:   #C4BBAA;
+
+  /* — lines — */
+  --line:         #E6E0D4;
+  --line-2:       #E9E3D6;
+  --line-3:       #ECE6D9;
+  --line-warm:    #EADFCE;
+  --line-faint:   #EAE4D7;
+  --line-strong:  #D6CDBC;
+  --line-dash:    #CFC7B6;
+  --line-spine:   #E1DACB;
+
+  /* — accent: terracotta — */
+  --accent:       #C2743D;
+  --accent-deep:  #A85F2C; /* text on warm chip */
+  --accent-2:     #C9803F;
+  --accent-3:     #C28F5A;
+
+  /* — sage (protected / positive / personal) — */
+  --sage:         #94A08A;
+  --sage-2:       #9AA6AE;
+
+  /* — slate (admin / meeting) — */
+  --slate:        #7E93A6;
+  --slate-2:      #8FA0AE;
+
+  /* — neutral category dot — */
+  --tan:          #B9A98F;
+
+  /* — type — */
+  --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --sans:  'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* — elevation — */
+  --shadow-card:  0 2px 8px rgba(33, 30, 24, 0.10);
+  --shadow-raise: 0 14px 40px -18px rgba(33, 30, 24, 0.30);
+  --shadow-soft:  0 14px 40px -22px rgba(33, 30, 24, 0.28);
+  --shadow-warm:  0 10px 26px -16px rgba(194, 116, 61, 0.50);
+  --shadow-warm-sm: 0 8px 22px -12px rgba(194, 116, 61, 0.50);
+
+  /* — radii — */
+  --r-xs: 8px;
+  --r-sm: 11px;
+  --r-md: 13px;
+  --r-lg: 16px;
+  --r-xl: 18px;
+  --r-pill: 999px;
+
+  /* — motion — */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur:  0.28s;
+}

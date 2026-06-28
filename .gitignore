@@ -1,0 +1,36 @@
+# ---- dependencies ----
+node_modules/
+
+# ---- web build output ----
+dist/
+*.tsbuildinfo
+
+# ---- Go build artifacts ----
+/server/cadence-server
+/server/bin/
+*.exe
+*.test
+*.out
+
+# ---- env / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- local tooling ----
+.claude/
+.playwright-mcp/
+
+# ---- logs ----
+*.log
+
+# ---- scratch screenshots (verification artifacts) ----
+/*.png
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
