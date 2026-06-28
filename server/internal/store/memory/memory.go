@@ -24,9 +24,10 @@ type Store struct {
 	broker   *broker
 
 	// auth
-	accounts    map[string]domain.Account // by email
-	loginTokens map[string]loginToken     // by token hash
-	sessions    map[string]domain.Session // by token hash
+	accounts    map[string]domain.Account  // by email
+	loginTokens map[string]loginToken      // by token hash
+	sessions    map[string]domain.Session  // by token hash
+	apiTokens   map[string]domain.APIToken // by token hash
 }
 
 type loginToken struct {
@@ -45,6 +46,7 @@ func New() *Store {
 		accounts:    make(map[string]domain.Account),
 		loginTokens: make(map[string]loginToken),
 		sessions:    make(map[string]domain.Session),
+		apiTokens:   make(map[string]domain.APIToken),
 	}
 }
 

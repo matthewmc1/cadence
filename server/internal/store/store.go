@@ -59,4 +59,10 @@ type Store interface {
 	CreateSession(ctx context.Context, tokenHash string, sess domain.Session) error
 	GetSession(ctx context.Context, tokenHash string) (domain.Session, error) // ErrNotFound if missing/expired
 	DeleteSession(ctx context.Context, tokenHash string) error
+
+	// Personal access tokens (Bearer auth for the MCP server / API clients).
+	CreateAPIToken(ctx context.Context, tokenHash string, tok domain.APIToken) error
+	ResolveAPIToken(ctx context.Context, tokenHash string) (domain.APIToken, error) // ErrNotFound; touches last_used_at
+	ListAPITokens(ctx context.Context, tenantID, userID string) ([]domain.APIToken, error)
+	RevokeAPIToken(ctx context.Context, tenantID, userID, id string) error
 }

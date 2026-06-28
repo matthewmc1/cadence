@@ -102,3 +102,53 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
 	return err
 }
+
+func (s *Store) CreateAPIToken(ctx context.Context, tokenHash string, tok domain.APIToken) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO api_tokens (token_hash, id, tenant_id, user_id, name, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		tokenHash, tok.ID, tok.TenantID, tok.UserID, tok.Name, tok.CreatedAt)
+	return err
+}
+
+func (s *Store) ResolveAPIToken(ctx context.Context, tokenHash string) (domain.APIToken, error) {
+	var t domain.APIToken
+	err := s.pool.QueryRow(ctx, `
+		UPDATE api_tokens SET last_used_at = now() WHERE token_hash = $1
+		RETURNING id::text, tenant_id::text, user_id::text, name, created_at, last_used_at`, tokenHash).
+		Scan(&t.ID, &t.TenantID, &t.UserID, &t.Name, &t.CreatedAt, &t.LastUsedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.APIToken{}, domain.ErrNotFound
+	}
+	return t, err
+}
+
+func (s *Store) ListAPITokens(ctx context.Context, tenantID, userID string) ([]domain.APIToken, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, name, created_at, last_used_at FROM api_tokens
+		WHERE tenant_id = $1 AND user_id = $2 ORDER BY created_at`, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.APIToken{}
+	for rows.Next() {
+		var t domain.APIToken
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.LastUsedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) RevokeAPIToken(ctx context.Context, tenantID, userID, id string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM api_tokens WHERE id = $1 AND tenant_id = $2 AND user_id = $3`, id, tenantID, userID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}

@@ -22,6 +22,16 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
+// APIToken is a personal access token for programmatic clients (Bearer auth).
+type APIToken struct {
+	ID         string     `json:"id"`
+	TenantID   string     `json:"-"`
+	UserID     string     `json:"-"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+}
+
 var avatarColors = []string{"#C2743D", "#7E93A6", "#94A08A", "#A85F2C", "#8FA0AE", "#B9A98F", "#6E869C"}
 
 // DeriveUser builds a User from just an email — name, initial and avatar colour

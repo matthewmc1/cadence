@@ -49,6 +49,7 @@ the **Live** indicator in the header).
 │   │   └── config/             # env config
 │   ├── migrations/             # SQL migrations (RLS, outbox, auth, indexes)
 │   └── scripts/                # app-role.sql (non-superuser RLS role)
+├── mcp/                        # MCP server — AI access to tasks/projects/outcomes
 └── docs/                       # ARCHITECTURE · SCHEMA · MIGRATIONS
 ```
 
@@ -141,6 +142,8 @@ routes return `401` without one.
 | `POST` | `/api/v1/auth/verify` | consume link → session cookie (public) |
 | `GET` | `/api/v1/auth/me` | current user, or 401 |
 | `POST` | `/api/v1/auth/logout` | end session |
+| `GET/POST` | `/api/v1/auth/tokens` | list / mint personal access tokens (Bearer) |
+| `DELETE` | `/api/v1/auth/tokens/{id}` | revoke a token |
 | `GET` | `/api/v1/bootstrap` | one-shot hydrate (tenant, user, projects, tasks) |
 | `GET/POST` | `/api/v1/tasks` | list / create |
 | `GET/PATCH/DELETE` | `/api/v1/tasks/{id}` | read / update / delete |
@@ -148,10 +151,26 @@ routes return `401` without one.
 | `PATCH/DELETE` | `/api/v1/projects/{id}` | update / delete |
 | `GET` | `/api/v1/realtime` | WebSocket event stream |
 
+- Identity is the session **cookie** (browser) **or** an `Authorization: Bearer
+  cdnc_…` personal access token (programmatic clients like the MCP server).
 - `PATCH` is a partial update; send `If-Match: <version>` for optimistic
   concurrency (stale → `409`).
 - WebSocket frames are `task.*` / `project.*` events; clients apply them
   idempotently by `id`+`version`.
+
+## AI access (MCP server)
+
+[`mcp/`](./mcp) is a [Model Context Protocol](https://modelcontextprotocol.io)
+server that connects an AI assistant (Claude Desktop/Code, …) to your Cadence
+workspace, so it can help you **focus** and reason about how tasks ladder up to
+**projects and outcomes**. Tools include `whats_next` (the focus view),
+`list_tasks`, `create_task`/`update_task`/`complete_task`, `list_projects`, and
+`project_status`, plus `daily-focus` / `weekly-review` prompts.
+
+Mint a token in the app (avatar → **API tokens** — the dialog hands you a
+ready-to-paste config), then see [`mcp/README.md`](./mcp/README.md) to wire it
+up. Auth is the personal access token above; everything the assistant does shows
+up live in the web app.
 
 ## Build & check
 

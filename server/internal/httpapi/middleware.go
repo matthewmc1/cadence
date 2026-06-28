@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cadence/server/internal/domain"
@@ -28,6 +29,19 @@ func Email(ctx context.Context) string    { v, _ := ctx.Value(ctxEmail).(string)
 func (s *Server) resolveIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		// 1) Bearer token (programmatic clients, e.g. the MCP server)
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			tok := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+			if tok != "" {
+				if t, err := s.store.ResolveAPIToken(ctx, hashToken(tok)); err == nil {
+					ctx = context.WithValue(ctx, ctxTenant, t.TenantID)
+					ctx = context.WithValue(ctx, ctxActor, t.UserID)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+		}
+		// 2) session cookie (browser)
 		if c, err := r.Cookie(s.cookieName); err == nil && c.Value != "" {
 			if sess, err := s.store.GetSession(ctx, hashToken(c.Value)); err == nil {
 				ctx = context.WithValue(ctx, ctxTenant, sess.TenantID)
@@ -72,7 +86,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h.Add("Vary", "Origin")
 		}
 		h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, If-Match")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, If-Match, Authorization")
 		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

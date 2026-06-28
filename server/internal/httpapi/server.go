@@ -71,6 +71,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleAuthLogout)
 
 	// ---- session-protected ----
+	mux.Handle("POST /api/v1/auth/tokens", s.auth(s.handleCreateToken))
+	mux.Handle("GET /api/v1/auth/tokens", s.auth(s.handleListTokens))
+	mux.Handle("DELETE /api/v1/auth/tokens/{id}", s.auth(s.handleRevokeToken))
 	mux.Handle("GET /api/v1/bootstrap", s.auth(s.handleBootstrap))
 	mux.Handle("GET /api/v1/tasks", s.auth(s.handleListTasks))
 	mux.Handle("POST /api/v1/tasks", s.auth(s.handleCreateTask))

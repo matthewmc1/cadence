@@ -86,6 +86,13 @@ export interface Bootstrap {
   serverAt: string;
 }
 
+export interface ApiTokenInfo {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
 export type EventType =
   | 'task.created'
   | 'task.updated'

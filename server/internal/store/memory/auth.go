@@ -75,3 +75,47 @@ func (s *Store) DeleteSession(_ context.Context, tokenHash string) error {
 	s.mu.Unlock()
 	return nil
 }
+
+func (s *Store) CreateAPIToken(_ context.Context, tokenHash string, tok domain.APIToken) error {
+	s.mu.Lock()
+	s.apiTokens[tokenHash] = tok
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) ResolveAPIToken(_ context.Context, tokenHash string) (domain.APIToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tok, ok := s.apiTokens[tokenHash]
+	if !ok {
+		return domain.APIToken{}, domain.ErrNotFound
+	}
+	now := time.Now().UTC()
+	tok.LastUsedAt = &now
+	s.apiTokens[tokenHash] = tok
+	return tok, nil
+}
+
+func (s *Store) ListAPITokens(_ context.Context, tenantID, userID string) ([]domain.APIToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []domain.APIToken{}
+	for _, t := range s.apiTokens {
+		if t.TenantID == tenantID && t.UserID == userID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) RevokeAPIToken(_ context.Context, tenantID, userID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for h, t := range s.apiTokens {
+		if t.ID == id && t.TenantID == tenantID && t.UserID == userID {
+			delete(s.apiTokens, h)
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}

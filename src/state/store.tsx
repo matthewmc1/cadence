@@ -39,6 +39,7 @@ interface RawState {
   selectedProjectId: string | null;
   editorTaskId: string | null;
   editorMode: 'edit' | 'create' | null;
+  tokensOpen: boolean;
   toast: string | null;
   highlightTaskId: string | null;
   connection: ConnState;
@@ -66,6 +67,7 @@ const initialState: RawState = {
   selectedProjectId: null,
   editorTaskId: null,
   editorMode: null,
+  tokensOpen: false,
   toast: null,
   highlightTaskId: null,
   connection: 'connecting',
@@ -93,6 +95,7 @@ type Action =
   | { type: 'SELECT_PROJECT'; id: string | null }
   | { type: 'OPEN_EDITOR'; id: string | null; mode: 'edit' | 'create' }
   | { type: 'CLOSE_EDITOR' }
+  | { type: 'SET_TOKENS_OPEN'; open: boolean }
   | { type: 'SET_TOAST'; toast: string | null }
   | { type: 'SET_HIGHLIGHT'; id: string | null }
   | { type: 'SET_CONNECTION'; state: ConnState }
@@ -151,6 +154,8 @@ function reducer(state: RawState, action: Action): RawState {
       return { ...state, editorTaskId: action.id, editorMode: action.mode };
     case 'CLOSE_EDITOR':
       return { ...state, editorTaskId: null, editorMode: null };
+    case 'SET_TOKENS_OPEN':
+      return { ...state, tokensOpen: action.open };
     case 'SET_TOAST':
       return { ...state, toast: action.toast };
     case 'SET_HIGHLIGHT':
@@ -198,6 +203,7 @@ export interface AppState {
   editorOpen: boolean;
   editorMode: 'edit' | 'create' | null;
   editingTask: NTask | null;
+  tokensOpen: boolean;
   draft: { title: string };
   toast: string | null;
   highlightTaskId: string | null;
@@ -246,6 +252,7 @@ function derive(s: RawState): AppState {
     editorOpen: s.editorMode != null,
     editorMode: s.editorMode,
     editingTask: s.editorMode === 'edit' ? (s.tasks.find((t) => t.id === s.editorTaskId) ?? null) : null,
+    tokensOpen: s.tokensOpen,
     draft: { title: s.draft },
     toast: s.toast,
     highlightTaskId: s.highlightTaskId,
@@ -283,6 +290,8 @@ export interface Actions {
   scheduleTaskAt: (id: string, dateStr: string, hour: number) => void;
   requestMagicLink: (email: string) => Promise<void>;
   signOut: () => void;
+  openTokens: () => void;
+  closeTokens: () => void;
   clearToast: () => void;
   clearHighlight: () => void;
 }
@@ -622,6 +631,9 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
     signOut: () => {
       api.logout().finally(() => dispatch({ type: 'AUTH_ANON' }));
     },
+
+    openTokens: () => dispatch({ type: 'SET_TOKENS_OPEN', open: true }),
+    closeTokens: () => dispatch({ type: 'SET_TOKENS_OPEN', open: false }),
   };
 }
 

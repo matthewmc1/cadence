@@ -4,6 +4,7 @@ import { StoreProvider, useApp, useActions } from './state/store';
 import { AppHeader } from './components/AppHeader';
 import { Toast } from './components/Toast';
 import { TaskEditor } from './components/TaskEditor';
+import { TokensModal } from './components/TokensModal';
 import { LoginView } from './views/LoginView';
 import { TodayView } from './views/TodayView';
 import { InsightsView } from './views/InsightsView';
@@ -64,6 +65,7 @@ function Shell() {
       <AppHeader />
       <Stage />
       <TaskEditor />
+      <TokensModal />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { Bootstrap, CreateTaskInput, Project, Task, TaskPatch, User } from './types';
+import type { ApiTokenInfo, Bootstrap, CreateTaskInput, Project, Task, TaskPatch, User } from './types';
 
 /**
  * Base URL of the Cadence API. Override with VITE_API_URL at build time; the
@@ -53,6 +53,11 @@ export const api = {
   requestLink: (email: string) => request<{ ok: boolean; email: string; devLink?: string }>('POST', '/api/v1/auth/request', { email }),
   verify: (token: string) => request<{ user: User }>('POST', '/api/v1/auth/verify', { token }),
   logout: () => request<void>('POST', '/api/v1/auth/logout'),
+
+  // ---- API tokens (for the MCP server / programmatic access) ----
+  listTokens: () => request<{ tokens: ApiTokenInfo[] }>('GET', '/api/v1/auth/tokens'),
+  createToken: (name: string) => request<{ token: string; id: string; name: string; createdAt: string }>('POST', '/api/v1/auth/tokens', { name }),
+  revokeToken: (id: string) => request<void>('DELETE', `/api/v1/auth/tokens/${id}`),
 
   // ---- data ----
   bootstrap: () => request<Bootstrap>('GET', '/api/v1/bootstrap'),

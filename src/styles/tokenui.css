@@ -1,0 +1,229 @@
+.tk-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(33, 30, 24, 0.32);
+  backdrop-filter: blur(2px);
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: scrim-in 0.2s var(--ease);
+}
+.tk {
+  width: 560px;
+  max-width: 100%;
+  max-height: 90vh;
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: 0 30px 80px -30px rgba(33, 30, 24, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: editor-in 0.3s var(--ease);
+}
+.tk__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 26px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.tk__title {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 2px 0 0;
+}
+.tk__close {
+  border: none;
+  background: transparent;
+  color: var(--ink-4);
+  font-size: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.tk__close:hover {
+  background: rgba(33, 30, 24, 0.06);
+  color: var(--ink);
+}
+.tk__body {
+  padding: 18px 26px 24px;
+  overflow: auto;
+}
+.tk__intro {
+  font-size: 13.5px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.tk__intro strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.tk__error {
+  background: #f6e3da;
+  color: #a8502c;
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+
+.tk__create {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.tk__name {
+  flex: 1;
+  font-size: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  padding: 11px 16px;
+  background: var(--paper);
+  color: var(--ink);
+  outline: none;
+}
+.tk__name:focus {
+  border-color: var(--accent);
+}
+.tk__createbtn {
+  padding: 11px 20px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.tk__fresh {
+  background: var(--paper);
+  border: 1px solid var(--line-warm);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 22px;
+}
+.tk__fresh-label,
+.tk__cfg-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.tk__cfg-label {
+  margin-top: 16px;
+}
+.tk__tokenrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tk__token {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 11px;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--accent-deep);
+}
+.tk__copy {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 14px;
+  border-radius: var(--r-pill);
+  flex-shrink: 0;
+}
+.tk__copy--block {
+  margin-top: 8px;
+}
+.tk__cfg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0;
+  color: var(--ink-2);
+}
+.tk__new {
+  margin-top: 14px;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tk__new:hover {
+  color: var(--ink);
+}
+
+.tk__list-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+  margin-bottom: 10px;
+}
+.tk__empty {
+  font-size: 13px;
+  color: var(--ink-5);
+}
+.tk__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tk__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  padding: 11px 14px;
+}
+.tk__item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tk__item-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.tk__item-meta {
+  font-size: 12px;
+  color: var(--ink-4);
+  margin-top: 2px;
+}
+.tk__revoke {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: #a8502c;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: var(--r-pill);
+  flex-shrink: 0;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.tk__revoke:hover {
+  border-color: #a8502c;
+  background: rgba(168, 80, 44, 0.06);
+}

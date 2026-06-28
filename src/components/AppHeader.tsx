@@ -11,7 +11,7 @@ const TABS: { view: View; label: string }[] = [
 
 export function AppHeader() {
   const { view, now, connection, editorOpen, editorMode, user } = useApp();
-  const { go, openCreate, signOut } = useActions();
+  const { go, openCreate, signOut, openTokens } = useActions();
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -86,6 +86,16 @@ export function AppHeader() {
                   <div className="appbar__menu-name">{user?.name}</div>
                   <div className="appbar__menu-email">{user?.email}</div>
                 </div>
+                <button
+                  className="appbar__menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    openTokens();
+                  }}
+                >
+                  API tokens
+                </button>
                 <button className="appbar__menu-item" role="menuitem" onClick={signOut}>
                   Sign out
                 </button>

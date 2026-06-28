@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cadence/server/internal/domain"
@@ -114,6 +115,56 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		Name: s.cookieName, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode,
 	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /auth/tokens {name} — mint a personal access token (shown once).
+func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, s.log, err)
+		return
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = "MCP token"
+	}
+	ctx := r.Context()
+	raw := "cdnc_" + newToken()
+	tok := domain.APIToken{
+		ID: domain.NewID(), TenantID: TenantID(ctx), UserID: ActorID(ctx),
+		Name: name, CreatedAt: time.Now().UTC(),
+	}
+	if err := s.store.CreateAPIToken(ctx, hashToken(raw), tok); err != nil {
+		writeError(w, s.log, err)
+		return
+	}
+	// `token` is returned only here, once.
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"token": raw, "id": tok.ID, "name": tok.Name, "createdAt": tok.CreatedAt,
+	})
+}
+
+// GET /auth/tokens — list this user's tokens (no secrets).
+func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	toks, err := s.store.ListAPITokens(ctx, TenantID(ctx), ActorID(ctx))
+	if err != nil {
+		writeError(w, s.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": toks})
+}
+
+// DELETE /auth/tokens/{id} — revoke a token.
+func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := s.store.RevokeAPIToken(ctx, TenantID(ctx), ActorID(ctx), r.PathValue("id")); err != nil {
+		writeError(w, s.log, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
