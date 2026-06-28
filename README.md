@@ -180,3 +180,7 @@ Postgres mode pulls `pgx` and `coder/websocket` (already in `go.mod`).
 - [docs/SCHEMA.md](./docs/SCHEMA.md) — tables, RLS, indexes, partitioning.
 - [docs/MIGRATIONS.md](./docs/MIGRATIONS.md) — zero-downtime expand/contract
   playbook.
+
+## License
+
+[MIT](./LICENSE) © Matthew McGibbon
