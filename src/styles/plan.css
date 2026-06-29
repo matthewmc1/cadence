@@ -322,14 +322,20 @@
 }
 .rail__item {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
   background: var(--paper-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   padding: 11px 13px;
   text-align: left;
   transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.rail__item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .rail__item:hover {
   transform: translateX(2px);

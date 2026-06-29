@@ -12,8 +12,11 @@ import { api, realtimeURL, ApiError } from '../api/client';
 import { connectRealtime, type ConnState } from '../api/realtime';
 import { inferTask, bestSlot, type Kind } from '../lib/energy';
 import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, clock, type Insights } from './selectors';
-import { computeNow, computeWeek, startOfWeek, addDays, ymd, combine, sameDay } from '../lib/time';
+import { computeNow, computeWeek, startOfWeek, addDays, ymd, combine, sameDay, occurrences } from '../lib/time';
+import type { SchedTask, WeekCtx, Assignment } from '../ai/scheduler';
 import type { View, Now, TodayItem, WeekDay, MonthGrid, BacklogTask, Project } from './types';
+
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /* ------------------------------------------------------------------- model */
 
@@ -210,7 +213,7 @@ export interface AppState {
 }
 
 function derive(s: RawState): AppState {
-  const backlog = selectBacklog(s.tasks);
+  const backlog = selectBacklog(s.tasks, s.projects);
   const activeProject = s.projects.find((p) => p.id === s.selectedProjectId) ?? s.projects[0];
   const anchorDate = new Date(s.planAnchor);
   const wk = computeWeek(anchorDate);
@@ -273,6 +276,8 @@ export interface Actions {
   selectBacklog: (id: string | null) => void;
   placeBacklog: (id: string, dayIndex: number, hour: number) => void;
   autoArrange: () => void;
+  schedContext: () => { tasks: SchedTask[]; ctx: WeekCtx };
+  applySchedule: (assignments: Assignment[]) => void;
   moveBoard: (id: string, column: 'backlog' | 'week' | 'focus' | 'done') => void;
   autoScheduleRemaining: () => void;
   deleteTask: (id: string) => void;
@@ -505,7 +510,7 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
     },
 
     autoArrange: () => {
-      const backlog = selectBacklog(ref.current.tasks);
+      const backlog = selectBacklog(ref.current.tasks, ref.current.projects);
       if (!backlog.length) return;
       backlog.forEach((b, i) => {
         const { patch, opt } = slotPatch(b.kind, i % 5);
@@ -513,6 +518,56 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       });
       dispatch({ type: 'SELECT_BACKLOG', id: null });
       toast(`Arranged ${backlog.length} tasks across your week`);
+    },
+
+    // Build the LLM scheduling context from raw tasks/projects + displayed week.
+    schedContext: () => {
+      const s = ref.current;
+      const projById = new Map(s.projects.map((p) => [p.id, p]));
+      const tasks: SchedTask[] = s.tasks
+        .filter((t) => t.status === 'backlog' && t.scheduledAt == null)
+        .sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.position - b.position)
+        .map((t) => ({
+          id: t.id,
+          title: t.title,
+          kind: t.kind,
+          effortHrs: t.effortMinutes / 60,
+          urgent: t.urgent,
+          deadline: t.deadline ? ymd(new Date(t.deadline)) : undefined,
+          project: t.projectId ? projById.get(t.projectId)?.name : undefined,
+        }));
+
+      const weekStart = startOfWeek(new Date(s.planAnchor));
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = addDays(weekStart, i);
+        const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const dayEnd = addDays(dayStart, 1);
+        let existing = 0;
+        for (const t of s.tasks) {
+          if (!t.scheduledAt || t.status === 'done') continue;
+          existing += occurrences(t.scheduledAt, t.recurrence, dayStart, dayEnd).length;
+        }
+        return { index: i, name: DOW[i], date: String(d.getDate()), existing, isPast: dayStart < todayStart };
+      });
+      const todayIndex = days.findIndex((_, i) => sameDay(addDays(weekStart, i), now));
+      const wkEnd = addDays(weekStart, 6);
+      const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      const ctx: WeekCtx = { weekLabel: `Week of ${fmt(weekStart)} – ${fmt(wkEnd)}`, todayIndex, days };
+      return { tasks, ctx };
+    },
+
+    applySchedule: (assignments) => {
+      for (const a of assignments) {
+        const at = slotISO(a.day, a.hour);
+        void patchTask(a.id, { status: 'scheduled', scheduledAt: at }, { status: 'scheduled', scheduledAt: at });
+      }
+      dispatch({ type: 'SELECT_BACKLOG', id: null });
+      if (assignments.length) {
+        dispatch({ type: 'SET_HIGHLIGHT', id: assignments[0].id });
+        toast(`Scheduled ${assignments.length} task${assignments.length === 1 ? '' : 's'} with AI`);
+      }
     },
 
     moveBoard: (id, column) => {

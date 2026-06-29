@@ -74,6 +74,7 @@ export interface BacklogTask {
   urgent?: boolean;
   effortHrs: number;
   bestFitNote?: string; // 'Best fit → Tuesday morning'
+  project?: { name: string; color: string }; // backlog spans every project
 }
 
 /* ----------------------------------------------------------------- Board */

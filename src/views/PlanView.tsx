@@ -2,6 +2,7 @@ import '../styles/plan.css';
 import { useApp, useActions } from '../state/store';
 import { KINDS, hourToY, bestSlot, fmtTime } from '../lib/energy';
 import { DayCurve } from '../components/DayCurve';
+import { AiSchedule } from '../components/AiSchedule';
 import type { PlacedTask } from '../state/types';
 
 const GUTTER = [
@@ -29,7 +30,7 @@ function Avatars({ people }: { people?: { initial: string; color: string }[] }) 
 
 export function PlanView() {
   const { planMode, planLabel, isThisWeek, week, month, backlog, backlogTotal, selectedBacklogId, highlightTaskId } = useApp();
-  const { selectBacklog, placeBacklog, autoArrange, openEditor, planPrev, planNext, planToday, setPlanMode } = useActions();
+  const { selectBacklog, placeBacklog, openEditor, planPrev, planNext, planToday, setPlanMode } = useActions();
 
   const selected = backlog.find((b) => b.id === selectedBacklogId) ?? null;
   const others = backlog.filter((b) => b.id !== selectedBacklogId);
@@ -103,18 +104,24 @@ export function PlanView() {
           <div className="rail__list">
             {others.map((b) => (
               <button key={b.id} className="rail__item" onClick={() => selectBacklog(b.id)}>
-                <span className="dot" style={{ width: 7, height: 7, background: KINDS[b.kind].dot }} />
-                <span className="rail__item-title">{b.title}</span>
-                <span className={'rail__item-tag' + (b.urgent ? ' rail__item-tag--urgent' : '')}>{b.tag}</span>
+                <span className="rail__item-row">
+                  <span className="dot" style={{ width: 7, height: 7, background: KINDS[b.kind].dot }} />
+                  <span className="rail__item-title">{b.title}</span>
+                  <span className={'rail__item-tag' + (b.urgent ? ' rail__item-tag--urgent' : '')}>{b.tag}</span>
+                </span>
+                {b.project && (
+                  <span className="rail__item-proj" style={{ color: b.project.color }}>
+                    <span className="dot" style={{ background: b.project.color }} />
+                    {b.project.name}
+                  </span>
+                )}
               </button>
             ))}
             {hiddenCount > 0 && <div className="rail__more">+ {hiddenCount} more</div>}
             {backlog.length === 0 && <div className="rail__empty">Nothing waiting — your backlog is clear.</div>}
           </div>
 
-          <button className="rail__auto pill-btn" onClick={autoArrange} disabled={!backlog.length}>
-            <span className="spark">✦</span> Auto-arrange this week
-          </button>
+          <AiSchedule />
         </aside>
 
         {/* main area */}

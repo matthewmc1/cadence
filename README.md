@@ -13,9 +13,11 @@ and zero-downtime migrations.
 - **Today** — your day along a live energy curve, derived from the real clock,
   with a protected deep-focus window.
 - **Plan** — a real calendar with **Week and Month** views, **navigation across
-  weeks/months**, and a backlog Cadence places into the slot that fits each
-  task's energy. Schedule anything on **any date** — and **repeats**
-  (daily / weekdays / weekly / monthly) expand across every week and month.
+  weeks/months**, and a backlog spanning **every project** that Cadence places
+  into the slot that fits each task's energy. Schedule anything on **any date** —
+  and **repeats** (daily / weekdays / weekly / monthly) expand across every week
+  and month. **"Plan my week with AI"** schedules the whole backlog with an
+  on-device LLM (see [On-device AI scheduling](#on-device-ai-scheduling)).
 - **Board** — a project kanban (Backlog · This week · In focus · Done) that
   remembers where work got done. Create and switch between projects inline.
 - **Insights** — computed from your **real completions**: peak window, the dip,
@@ -38,7 +40,8 @@ the **Live** indicator in the header).
 ├── index.html, src/            # React + TypeScript + Vite web app
 │   ├── api/                    # typed API client + realtime (WS) client
 │   ├── state/                  # store (optimistic CRUD + realtime), selectors
-│   ├── components/, views/     # the design system and the five views
+│   ├── ai/                     # on-device LLM (WebGPU + Ollama) + scheduler
+│   ├── components/, views/     # the design system and the views
 │   └── lib/                    # energy model + curve/heatmap math
 ├── server/                     # Go API + realtime backend
 │   ├── cmd/cadence-server/     # entrypoint
@@ -171,6 +174,32 @@ Mint a token in the app (avatar → **API tokens** — the dialog hands you a
 ready-to-paste config), then see [`mcp/README.md`](./mcp/README.md) to wire it
 up. Auth is the personal access token above; everything the assistant does shows
 up live in the web app.
+
+## On-device AI scheduling
+
+The Plan view's **"Plan my week with AI"** hands your whole backlog to a small
+LLM that places each task around your energy — deep work in the morning peak,
+light/admin in the post-lunch dip, urgent first, deadlines respected, personal
+tasks on the weekend, spread out and collision-free. **Everything runs on your
+machine — no task data leaves the device.** Two interchangeable backends
+(pattern borrowed from `~/loam`):
+
+- **WebGPU (primary)** — a model runs fully in-browser via
+  [`@mlc-ai/web-llm`](https://github.com/mlc-ai/web-llm) (Gemma 2 2B / Gemma 3
+  1B). Zero install; lazy-loaded so the app bundle stays small.
+- **Ollama (fallback)** — a local [Ollama](https://ollama.com) server for bigger
+  / newer models (Gemma 3 4B, Qwen 2.5 7B). Cadence detects what you have
+  installed; pick a model from the picker under the button.
+
+Pick the backend/model from the **picker beside the button**; the choice is
+saved locally. The model's output is reconciled into a guaranteed-valid,
+in-range, collision-free schedule, so even a 1–2B model can't produce a broken
+week. A **"quick arrange"** heuristic (no model) is always available as an
+instant fallback.
+
+> The AI code lives in [`src/ai/`](./src/ai) (`config.ts`, `llm.ts`,
+> `llm.worker.ts`, `scheduler.ts`). WebGPU needs a Chromium-based browser or
+> Safari Technology Preview; otherwise the picker defaults to Ollama.
 
 ## Build & check
 

@@ -146,18 +146,24 @@ export function selectMonth(tasks: NTask[], anchor: Date): MonthGrid {
   return { label: monthLabel(anchor), weeks };
 }
 
-export function selectBacklog(tasks: NTask[]): BacklogTask[] {
+/** Every unscheduled backlog task — across all projects — for the planning board. */
+export function selectBacklog(tasks: NTask[], projects: NProject[] = []): BacklogTask[] {
+  const projById = new Map(projects.map((p) => [p.id, p]));
   return tasks
-    .filter((t) => t.status === 'backlog' && t.projectId == null && t.scheduledAt == null)
-    .sort((a, b) => a.position - b.position)
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      kind: t.kind,
-      tag: t.urgent ? 'Urgent' : KIND_SHORT[t.kind],
-      urgent: t.urgent,
-      effortHrs: t.effortMinutes / 60,
-    }));
+    .filter((t) => t.status === 'backlog' && t.scheduledAt == null)
+    .sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.position - b.position)
+    .map((t) => {
+      const proj = t.projectId ? projById.get(t.projectId) : undefined;
+      return {
+        id: t.id,
+        title: t.title,
+        kind: t.kind,
+        tag: t.urgent ? 'Urgent' : KIND_SHORT[t.kind],
+        urgent: t.urgent,
+        effortHrs: t.effortMinutes / 60,
+        project: proj ? { name: proj.name, color: proj.color } : undefined,
+      };
+    });
 }
 
 /* ----------------------------------------------------------------- Board */
