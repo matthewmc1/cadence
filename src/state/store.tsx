@@ -10,8 +10,8 @@ import {
 import type { Task as NTask, Project as NProject, ServerEvent, TaskPatch, CreateTaskInput, User } from '../api/types';
 import { api, realtimeURL, ApiError } from '../api/client';
 import { connectRealtime, type ConnState } from '../api/realtime';
-import { inferTask, bestSlot, type Kind } from '../lib/energy';
-import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, clock, type Insights } from './selectors';
+import { inferTask, bestSlot, type Kind, type EnergyProfile } from '../lib/energy';
+import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, deriveEnergyProfile, priorityScore, clock, type Insights } from './selectors';
 import { computeNow, computeWeek, startOfWeek, addDays, ymd, combine, sameDay, occurrences } from '../lib/time';
 import type { SchedTask, WeekCtx, Assignment } from '../ai/scheduler';
 import type { View, Now, TodayItem, WeekDay, MonthGrid, BacklogTask, Project } from './types';
@@ -203,6 +203,7 @@ export interface AppState {
   selectedProjectId: string | null;
   people: { userId: string; initial: string; color: string }[];
   insights: Insights;
+  energyProfile: EnergyProfile;
   editorOpen: boolean;
   editorMode: 'edit' | 'create' | null;
   editingTask: NTask | null;
@@ -214,6 +215,7 @@ export interface AppState {
 
 function derive(s: RawState): AppState {
   const backlog = selectBacklog(s.tasks, s.projects);
+  const insights = computeInsights(s.tasks);
   const activeProject = s.projects.find((p) => p.id === s.selectedProjectId) ?? s.projects[0];
   const anchorDate = new Date(s.planAnchor);
   const wk = computeWeek(anchorDate);
@@ -251,7 +253,8 @@ function derive(s: RawState): AppState {
     projects: s.projects.map((p) => ({ id: p.id, name: p.name, color: p.color })),
     selectedProjectId: activeProject?.id ?? null,
     people: [...peopleMap.values()],
-    insights: computeInsights(s.tasks),
+    insights,
+    energyProfile: insights.profile,
     editorOpen: s.editorMode != null,
     editorMode: s.editorMode,
     editingTask: s.editorMode === 'edit' ? (s.tasks.find((t) => t.id === s.editorTaskId) ?? null) : null,
@@ -448,8 +451,11 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
   const slotISO = (dayIndex: number, hour: number) =>
     combine(ymd(addDays(startOfWeek(new Date(ref.current.planAnchor)), dayIndex)), hour);
 
-  const slotPatch = (kind: Kind, fromDay: number): { patch: TaskPatch; opt: Partial<NTask> } => {
-    const slot = bestSlot(kind, fromDay);
+  // the user's learned energy profile, from their completion history
+  const profileNow = (): EnergyProfile => deriveEnergyProfile(ref.current.tasks);
+
+  const slotPatch = (kind: Kind, fromDay: number, profile: EnergyProfile): { patch: TaskPatch; opt: Partial<NTask> } => {
+    const slot = bestSlot(kind, fromDay, profile);
     const at = slotISO(slot.dayIndex, slot.hour);
     return {
       patch: { status: 'scheduled', scheduledAt: at },
@@ -469,7 +475,7 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       const title = ref.current.draft.trim();
       if (!title) return;
       const inf = inferTask(title);
-      const slot = bestSlot(inf.kind, 0);
+      const slot = bestSlot(inf.kind, 0, profileNow());
       const at = slotISO(slot.dayIndex, slot.hour);
       const input: CreateTaskInput = {
         title,
@@ -512,8 +518,9 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
     autoArrange: () => {
       const backlog = selectBacklog(ref.current.tasks, ref.current.projects);
       if (!backlog.length) return;
+      const profile = profileNow();
       backlog.forEach((b, i) => {
-        const { patch, opt } = slotPatch(b.kind, i % 5);
+        const { patch, opt } = slotPatch(b.kind, i % 5, profile);
         void patchTask(b.id, patch, opt);
       });
       dispatch({ type: 'SELECT_BACKLOG', id: null });
@@ -526,13 +533,14 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       const projById = new Map(s.projects.map((p) => [p.id, p]));
       const tasks: SchedTask[] = s.tasks
         .filter((t) => t.status === 'backlog' && t.scheduledAt == null)
-        .sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.position - b.position)
+        .sort((a, b) => priorityScore(b) - priorityScore(a) || a.position - b.position)
         .map((t) => ({
           id: t.id,
           title: t.title,
           kind: t.kind,
           effortHrs: t.effortMinutes / 60,
           urgent: t.urgent,
+          important: t.important,
           deadline: t.deadline ? ymd(new Date(t.deadline)) : undefined,
           project: t.projectId ? projById.get(t.projectId)?.name : undefined,
         }));
@@ -554,7 +562,13 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       const todayIndex = days.findIndex((_, i) => sameDay(addDays(weekStart, i), now));
       const wkEnd = addDays(weekStart, 6);
       const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      const ctx: WeekCtx = { weekLabel: `Week of ${fmt(weekStart)} – ${fmt(wkEnd)}`, todayIndex, days };
+      const p = deriveEnergyProfile(s.tasks);
+      const ctx: WeekCtx = {
+        weekLabel: `Week of ${fmt(weekStart)} – ${fmt(wkEnd)}`,
+        todayIndex,
+        days,
+        energy: { peakStart: p.peakStart, peakEnd: p.peakEnd, dipHour: p.dipHour, learned: p.learned },
+      };
       return { tasks, ctx };
     },
 
@@ -577,7 +591,7 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       const patch: TaskPatch = { status };
       const opt: Partial<NTask> = { status };
       if (column === 'week' && t.scheduledAt == null) {
-        const slot = bestSlot(t.kind, 0);
+        const slot = bestSlot(t.kind, 0, profileNow());
         const at = slotISO(slot.dayIndex, slot.hour);
         patch.scheduledAt = at;
         opt.scheduledAt = at;
@@ -594,8 +608,9 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
         toast('Everything is already scheduled');
         return;
       }
+      const profile = profileNow();
       remaining.forEach((t, i) => {
-        const { patch, opt } = slotPatch(t.kind, i % 5);
+        const { patch, opt } = slotPatch(t.kind, i % 5, profile);
         void patchTask(t.id, patch, opt);
       });
       toast(`Scheduled ${remaining.length} tasks into open focus slots`);

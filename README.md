@@ -14,19 +14,26 @@ and zero-downtime migrations.
   with a protected deep-focus window.
 - **Plan** — a real calendar with **Week and Month** views, **navigation across
   weeks/months**, and a backlog spanning **every project** that Cadence places
-  into the slot that fits each task's energy. Schedule anything on **any date** —
-  and **repeats** (daily / weekdays / weekly / monthly) expand across every week
-  and month. **"Plan my week with AI"** schedules the whole backlog with an
-  on-device LLM (see [On-device AI scheduling](#on-device-ai-scheduling)).
+  into the slot that fits each task's energy. Prioritisation runs on the full
+  **Eisenhower** matrix — **important** work (deep, long-term) outranks
+  merely-**urgent** work, and the energy **peak is a defended lane** reserved for
+  important/deep tasks so loud-but-shallow work can't evict it. Schedule anything
+  on **any date** — and **repeats** (daily / weekdays / weekly / monthly) expand
+  across every week and month. **"Plan my week with AI"** schedules the whole
+  backlog with an on-device LLM (see
+  [On-device AI scheduling](#on-device-ai-scheduling)).
 - **Board** — a project kanban (Backlog · This week · In focus · Done) that
   remembers where work got done. Create and switch between projects inline.
 - **Insights** — computed from your **real completions**: peak window, the dip,
-  where you work, and which days you ship.
+  where you work, and which days you ship. This isn't just a report — the peak
+  and dip it measures are the **same windows scheduling places work into**, so
+  Cadence learns *when* you do your best thinking and plans around it.
 
 **The task editor** (New task, or click any task on Plan/Board/Today) edits
 every field — type, effort, **date + time**, place, project, deadline,
-**repeat**, urgency, notes, **subtasks, links, and who it's shared with**.
-Cadence pre-infers a sensible shape and best slot, all of it editable.
+**repeat**, **importance & urgency**, notes, **subtasks, links, and who it's
+shared with**. Cadence pre-infers a sensible shape and best slot, all of it
+editable.
 
 Sign in is **passwordless** (magic link); each account gets its own private,
 multi-tenant workspace. Everything is **live**: create/edit/delete persist
@@ -178,11 +185,14 @@ up live in the web app.
 ## On-device AI scheduling
 
 The Plan view's **"Plan my week with AI"** hands your whole backlog to a small
-LLM that places each task around your energy — deep work in the morning peak,
-light/admin in the post-lunch dip, urgent first, deadlines respected, personal
-tasks on the weekend, spread out and collision-free. **Everything runs on your
-machine — no task data leaves the device.** Two interchangeable backends
-(pattern borrowed from `~/loam`):
+LLM that places each task around your energy — deep/important work in your
+**learned peak**, light/admin in the post-lunch dip, **important before merely
+urgent**, deadlines respected, personal tasks on the weekend, spread out and
+collision-free. The peak/dip windows are **learned from your own completion
+history** (falling back to a sensible default until there's enough signal), and
+a deterministic reconcile step **guarantees the peak stays reserved for deep /
+important work**. **Everything runs on your machine — no task data leaves the
+device.** Two interchangeable backends (pattern borrowed from `~/loam`):
 
 - **WebGPU (primary)** — a model runs fully in-browser via
   [`@mlc-ai/web-llm`](https://github.com/mlc-ai/web-llm) (Gemma 2 2B / Gemma 3

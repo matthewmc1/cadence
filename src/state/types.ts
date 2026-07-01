@@ -70,8 +70,9 @@ export interface BacklogTask {
   id: string;
   title: string;
   kind: Kind;
-  tag: string; // 'Deep' | 'Admin' | 'Urgent' ...
+  tag: string; // 'Deep' | 'Admin' | 'Urgent' | 'Important' ...
   urgent?: boolean;
+  important?: boolean;
   effortHrs: number;
   bestFitNote?: string; // 'Best fit → Tuesday morning'
   project?: { name: string; color: string }; // backlog spans every project

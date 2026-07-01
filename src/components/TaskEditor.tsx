@@ -14,6 +14,7 @@ interface Form {
   status: Status;
   effortMinutes: number;
   urgent: boolean;
+  important: boolean;
   note: string;
   projectId: string | null;
   place: string | null;
@@ -39,7 +40,7 @@ const RECUR: Recurrence[] = ['none', 'daily', 'weekdays', 'weekly', 'monthly'];
 
 function blankForm(): Form {
   return {
-    title: '', kind: 'light', status: 'backlog', effortMinutes: 40, urgent: false, note: '',
+    title: '', kind: 'light', status: 'backlog', effortMinutes: 40, urgent: false, important: false, note: '',
     projectId: null, place: null, scheduledDate: '', scheduledHour: 9,
     deadline: null, recurrence: 'none', links: [], subtasks: [], assigneeIds: [],
   };
@@ -49,7 +50,7 @@ let tmp = 0;
 const tmpId = () => `sub-tmp-${tmp++}`;
 
 export function TaskEditor() {
-  const { editorOpen, editorMode, editingTask, projects, people } = useApp();
+  const { editorOpen, editorMode, editingTask, projects, people, energyProfile } = useApp();
   const actions = useActions();
 
   const [form, setForm] = useState<Form>(blankForm());
@@ -74,7 +75,7 @@ export function TaskEditor() {
     if (editorMode === 'edit' && editingTask) {
       const t = editingTask;
       setForm({
-        title: t.title, kind: t.kind, status: t.status, effortMinutes: t.effortMinutes, urgent: t.urgent,
+        title: t.title, kind: t.kind, status: t.status, effortMinutes: t.effortMinutes, urgent: t.urgent, important: t.important,
         note: t.note, projectId: t.projectId, place: t.place,
         scheduledDate: t.scheduledAt ? ymd(new Date(t.scheduledAt)) : '',
         scheduledHour: t.scheduledAt ? hourOf(new Date(t.scheduledAt)) : 9,
@@ -99,7 +100,7 @@ export function TaskEditor() {
 
   if (!editorOpen) return null;
 
-  const suggestion = bestSlot(form.kind, 0);
+  const suggestion = bestSlot(form.kind, 0, energyProfile);
   const applyBestSlot = () => {
     const date = ymd(addDays(startOfWeek(new Date()), suggestion.dayIndex));
     setForm((f) => ({ ...f, status: 'scheduled', scheduledDate: date, scheduledHour: suggestion.hour, place: f.place ?? suggestion.place }));
@@ -120,7 +121,7 @@ export function TaskEditor() {
 
     const scheduledAt = form.scheduledDate ? combine(form.scheduledDate, form.scheduledHour) : null;
     const common = {
-      title, kind: form.kind, status: form.status, effortMinutes: form.effortMinutes, urgent: form.urgent,
+      title, kind: form.kind, status: form.status, effortMinutes: form.effortMinutes, urgent: form.urgent, important: form.important,
       note: form.note, projectId: form.projectId, place: form.place, scheduledAt,
       deadline: form.deadline, recurrence: form.recurrence, links: form.links, subtasks: form.subtasks, assignees,
     };
@@ -273,9 +274,14 @@ export function TaskEditor() {
             </Field>
           </div>
 
-          <Field label="Urgent">
-            <Toggle on={form.urgent} onChange={(v) => set('urgent', v)} label="Mark urgent" />
-          </Field>
+          <div className="editor__row">
+            <Field label="Important">
+              <Toggle on={form.important} onChange={(v) => set('important', v)} label="Deep, long-term work — gets your peak hours" />
+            </Field>
+            <Field label="Urgent">
+              <Toggle on={form.urgent} onChange={(v) => set('urgent', v)} label="Time-sensitive — schedule it soon" />
+            </Field>
+          </div>
 
           {people.length > 0 && (
             <Field label="With">

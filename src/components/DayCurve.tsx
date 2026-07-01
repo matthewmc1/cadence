@@ -1,27 +1,29 @@
 import { catmullRom, type Point } from '../lib/curve';
-import { HOUR_ENERGY, hourToY } from '../lib/energy';
+import { energyAt, hourToY, DEFAULT_PROFILE, type EnergyProfile } from '../lib/energy';
 
 /**
  * The faint energy curve that sits behind each day column on Plan.
  * Ported from the canvas's `dayCurve(scale, weekend)`: weekends are damped,
- * weekdays get a peak marker at ~9:30.
+ * weekdays get a peak marker. The curve follows the user's learned energy
+ * `profile`, so it visibly tracks where their focus actually falls.
  */
 const TIMES = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 const SPINE_X = 8;
 const MAX_B = 44;
 
-export function DayCurve({ scale, weekend }: { scale: number; weekend: boolean }) {
+export function DayCurve({ scale, weekend, profile = DEFAULT_PROFILE }: { scale: number; weekend: boolean; profile?: EnergyProfile }) {
   const wf = weekend ? 0.4 : 1;
   const pts: Point[] = TIMES.map((h) => {
-    let en = HOUR_ENERGY[h] * scale * wf;
+    let en = energyAt(h, profile) * scale * wf;
     if (weekend) en = Math.min(en, 0.3);
     return [Number((SPINE_X + en * MAX_B).toFixed(1)), Number(hourToY(h, 520).toFixed(1))];
   });
   const path = catmullRom(pts);
   const area = `${path} L${SPINE_X},520 L${SPINE_X},0 Z`;
 
-  const peakX = SPINE_X + HOUR_ENERGY[10] * scale * MAX_B;
-  const peakY = hourToY(9.5, 520);
+  const peakHour = profile.peakStart + 0.5; // where deep work settles
+  const peakX = SPINE_X + energyAt(peakHour, profile) * scale * MAX_B;
+  const peakY = hourToY(peakHour, 520);
 
   return (
     <svg

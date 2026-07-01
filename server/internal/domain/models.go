@@ -89,6 +89,7 @@ type Task struct {
 	Status        Status     `json:"status"`
 	EffortMinutes int        `json:"effortMinutes"`
 	Urgent        bool       `json:"urgent"`
+	Important     bool       `json:"important"` // the "important" axis (Eisenhower): protects deep long-term work
 	Note          string     `json:"note"`
 	Place         *string    `json:"place"`
 	ScheduledAt   *time.Time `json:"scheduledAt"` // absolute datetime the task is planned for

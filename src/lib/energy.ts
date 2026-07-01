@@ -97,14 +97,48 @@ export const HOUR_ENERGY: Record<number, number> = {
   20: 0.14,
 };
 
-/** Continuous energy at any (possibly fractional) hour, linearly interpolated. */
-export function energyAt(hour: number): number {
-  const lo = Math.floor(hour);
-  const hi = Math.ceil(hour);
+/** The day's named windows (the canonical model; personalised per user below). */
+export const PEAK = { start: 9, end: 11, label: '9:00 – 11:00', share: 68 } as const;
+export const DIP = { start: 13, end: 14, label: '1:00 – 2:00' } as const;
+
+/**
+ * A personal energy profile — where *this* user's focus peak and low-energy dip
+ * actually fall, learned from their completion history (see
+ * `deriveEnergyProfile` in state/selectors). Until there's enough signal it
+ * stays on the canonical defaults, so scheduling is unchanged for a new account.
+ */
+export interface EnergyProfile {
+  peakStart: number; // first hour of the focus peak (e.g. 9)
+  peakEnd: number; // exclusive end of the peak (e.g. 11)
+  dipHour: number; // the low-energy hour best spent on admin/light work
+  samples: number; // completed tasks this was learned from
+  learned: boolean; // false → still on the canonical defaults
+}
+
+export const DEFAULT_PROFILE: EnergyProfile = {
+  peakStart: PEAK.start,
+  peakEnd: PEAK.end,
+  dipHour: DIP.start,
+  samples: 0,
+  learned: false,
+};
+
+const peakCenter = (p: EnergyProfile) => (p.peakStart + p.peakEnd) / 2;
+const CANON_PEAK_CENTER = (PEAK.start + PEAK.end) / 2;
+
+/**
+ * Continuous energy at any (possibly fractional) hour, linearly interpolated.
+ * When a learned `profile` is supplied, the canonical curve is shifted so its
+ * peak sits on the user's measured peak.
+ */
+export function energyAt(hour: number, profile: EnergyProfile = DEFAULT_PROFILE): number {
+  const h = hour - (peakCenter(profile) - CANON_PEAK_CENTER);
+  const lo = Math.floor(h);
+  const hi = Math.ceil(h);
   if (lo === hi) return HOUR_ENERGY[lo] ?? 0;
   const a = HOUR_ENERGY[lo] ?? 0;
   const b = HOUR_ENERGY[hi] ?? 0;
-  return a + (b - a) * (hour - lo);
+  return a + (b - a) * (h - lo);
 }
 
 /** Map an hour (7–19) to a y-offset within a column of `height` px. */
@@ -112,16 +146,12 @@ export function hourToY(hour: number, height = 520): number {
   return ((hour - 7) / 12) * height;
 }
 
-/** The day's named windows. */
-export const PEAK = { start: 9, end: 11, label: '9:00 – 11:00', share: 68 } as const;
-export const DIP = { start: 13, end: 14, label: '1:00 – 2:00' } as const;
-
 export type Band = 'peak' | 'good' | 'dip' | 'low';
 
-export function bandAt(hour: number): Band {
-  if (hour >= PEAK.start && hour < PEAK.end) return 'peak';
-  if (hour >= DIP.start && hour < DIP.end) return 'dip';
-  return energyAt(hour) >= 0.55 ? 'good' : 'low';
+export function bandAt(hour: number, profile: EnergyProfile = DEFAULT_PROFILE): Band {
+  if (hour >= profile.peakStart && hour < profile.peakEnd) return 'peak';
+  if (hour >= profile.dipHour && hour < profile.dipHour + 1) return 'dip';
+  return energyAt(hour, profile) >= 0.55 ? 'good' : 'low';
 }
 
 /* -------------------------------------------------------------- weekday model */
@@ -235,16 +265,18 @@ export const fmtTime = HHMM;
  * admin is happiest in the dip; meetings sit in the early afternoon;
  * light work fills whatever's left.
  */
-function fit(kind: Kind, hour: number): number {
-  const e = energyAt(hour);
+function fit(kind: Kind, hour: number, profile: EnergyProfile = DEFAULT_PROFILE): number {
+  const e = energyAt(hour, profile);
+  const deepTarget = profile.peakStart + 0.5; // settle just inside the peak
+  const dipCenter = profile.dipHour + 0.5;
   switch (kind) {
     case 'deep':
-      // ride high energy, but settle into the heart of the peak (~9:30)
-      return e - Math.abs(hour - 9.5) * 0.05;
+      // ride high energy, but settle into the heart of the peak
+      return e - Math.abs(hour - deepTarget) * 0.05;
     case 'admin':
-      return 1 - Math.abs(hour - 13.5) / 6; // gravitate to the dip
+      return 1 - Math.abs(hour - dipCenter) / 6; // gravitate to the dip
     case 'meet':
-      return 1 - Math.abs(hour - 13) / 6; // early afternoon
+      return 1 - Math.abs(hour - profile.dipHour) / 6; // early afternoon
     case 'personal':
       return hour >= 12 ? 0.6 : 0.4;
     case 'light':
@@ -257,7 +289,7 @@ function fit(kind: Kind, hour: number): number {
  * Find the best upcoming slot for a task. Searches the working week's mornings
  * and afternoons, preferring earlier days so deadlines have slack.
  */
-export function bestSlot(kind: Kind, fromDayIndex = 0): Slot {
+export function bestSlot(kind: Kind, fromDayIndex = 0, profile: EnergyProfile = DEFAULT_PROFILE): Slot {
   const candidateHours = [8.5, 9, 9.5, 10, 11, 11.5, 13, 14, 15, 15.5, 16];
   let best: Slot | null = null;
   let bestScore = -Infinity;
@@ -266,7 +298,7 @@ export function bestSlot(kind: Kind, fromDayIndex = 0): Slot {
     const day = WEEK_MODEL[d];
     for (const hour of candidateHours) {
       // weekday scale + fit, with a gentle preference for sooner days
-      const score = fit(kind, hour) * day.scale - d * 0.015;
+      const score = fit(kind, hour, profile) * day.scale - d * 0.015;
       if (score > bestScore) {
         bestScore = score;
         best = {

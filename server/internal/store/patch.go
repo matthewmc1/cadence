@@ -61,6 +61,12 @@ func ApplyTaskPatch(t *domain.Task, patch map[string]any, now time.Time) error {
 				return domain.Invalid("urgent", "must be a boolean")
 			}
 			t.Urgent = b
+		case "important":
+			b, ok := v.(bool)
+			if !ok {
+				return domain.Invalid("important", "must be a boolean")
+			}
+			t.Important = b
 		case "note":
 			if v == nil {
 				t.Note = ""

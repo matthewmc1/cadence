@@ -122,6 +122,7 @@ export function taskLine(t: Task, projects: Project[], at?: Date): string {
   if (p) bits.push(`→ ${p.name}`);
   if (t.deadline) bits.push(`⏰ due ${fmtDate(new Date(t.deadline))}`);
   if (t.urgent) bits.push('🔴 urgent');
+  if (t.important) bits.push('⭐ important');
   if (t.place) bits.push(`· ${t.place}`);
   const subs = t.subtasks.length ? ` (${t.subtasks.filter((s) => s.done).length}/${t.subtasks.length} subtasks)` : '';
   const who = t.assignees.length ? ` 👥 ${t.assignees.map((a) => a.initial).join(',')}` : '';

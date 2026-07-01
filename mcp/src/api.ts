@@ -27,6 +27,7 @@ export interface Task {
   status: Status;
   effortMinutes: number;
   urgent: boolean;
+  important: boolean;
   note: string;
   place: string | null;
   scheduledAt: string | null;
@@ -106,6 +107,7 @@ export interface CreateTaskInput {
   status?: Status;
   effortMinutes?: number;
   urgent?: boolean;
+  important?: boolean;
   note?: string;
   place?: string | null;
   scheduledAt?: string | null;

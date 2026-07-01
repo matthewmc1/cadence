@@ -1,6 +1,6 @@
 import type { Task as NTask, Project as NProject } from '../api/types';
 import type { TodayItem, WeekDay, MonthGrid, MonthDay, PlacedTask, BacklogTask, Project, BoardTask, BoardColumn } from './types';
-import { KINDS, WEEK_MODEL, type Kind } from '../lib/energy';
+import { KINDS, WEEK_MODEL, DEFAULT_PROFILE, type Kind, type EnergyProfile } from '../lib/energy';
 import { occurrences, hourOf, sameDay, addDays, startOfWeek, startOfMonth, monthLabel, ymd } from '../lib/time';
 
 /* ------------------------------------------------------------- formatters */
@@ -146,20 +146,30 @@ export function selectMonth(tasks: NTask[], anchor: Date): MonthGrid {
   return { label: monthLabel(anchor), weeks };
 }
 
+/**
+ * Eisenhower priority. Importance outranks mere urgency so deep, long-term work
+ * isn't perpetually crowded out by loud-but-shallow tasks:
+ * important+urgent (3) > important (2) > urgent (1) > neither (0).
+ */
+export function priorityScore(t: { urgent?: boolean | null; important?: boolean | null }): number {
+  return (t.important ? 2 : 0) + (t.urgent ? 1 : 0);
+}
+
 /** Every unscheduled backlog task — across all projects — for the planning board. */
 export function selectBacklog(tasks: NTask[], projects: NProject[] = []): BacklogTask[] {
   const projById = new Map(projects.map((p) => [p.id, p]));
   return tasks
     .filter((t) => t.status === 'backlog' && t.scheduledAt == null)
-    .sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.position - b.position)
+    .sort((a, b) => priorityScore(b) - priorityScore(a) || a.position - b.position)
     .map((t) => {
       const proj = t.projectId ? projById.get(t.projectId) : undefined;
       return {
         id: t.id,
         title: t.title,
         kind: t.kind,
-        tag: t.urgent ? 'Urgent' : KIND_SHORT[t.kind],
+        tag: t.urgent ? 'Urgent' : t.important ? 'Important' : KIND_SHORT[t.kind],
         urgent: t.urgent,
+        important: t.important,
         effortHrs: t.effortMinutes / 60,
         project: proj ? { name: proj.name, color: proj.color } : undefined,
       };
@@ -230,6 +240,49 @@ export interface Insights {
   adminDay: string; // weekday that runs admin-heavy
   bestWhen: string; // e.g. "weekday mornings"
   topPlace: string; // e.g. "home"
+  profile: EnergyProfile; // the learned peak/dip that scheduling now uses
+}
+
+const MIN_PROFILE_SAMPLES = 5;
+
+/**
+ * Learn where the user's focus peak and low-energy dip actually fall, from the
+ * hours at which they complete work (weekdays only). Falls back to the
+ * canonical DEFAULT_PROFILE until there's enough signal, so a new account
+ * schedules exactly as before. This is what closes the loop between what
+ * Insights *measures* and how `bestSlot` / the AI scheduler *place* work.
+ */
+export function deriveEnergyProfile(tasks: NTask[]): EnergyProfile {
+  const perHour = new Array(24).fill(0);
+  let samples = 0;
+  for (const t of tasks) {
+    if (t.status !== 'done' || !t.doneAt) continue;
+    const d = new Date(t.doneAt);
+    if (((d.getUTCDay() + 6) % 7) > 4) continue; // weekdays shape the working profile
+    perHour[d.getUTCHours()]++;
+    samples++;
+  }
+  if (samples < MIN_PROFILE_SAMPLES) return DEFAULT_PROFILE;
+
+  let peakStart = DEFAULT_PROFILE.peakStart;
+  let peakBest = -1;
+  for (let h = 7; h <= 17; h++) {
+    const c = perHour[h] + perHour[h + 1];
+    if (c > peakBest) {
+      peakBest = c;
+      peakStart = h;
+    }
+  }
+  let dipHour = DEFAULT_PROFILE.dipHour;
+  let dipBest = Infinity;
+  for (let h = 8; h <= 17; h++) {
+    if (h >= peakStart && h < peakStart + 2) continue; // the dip isn't the peak
+    if (perHour[h] < dipBest) {
+      dipBest = perHour[h];
+      dipHour = h;
+    }
+  }
+  return { peakStart, peakEnd: peakStart + 2, dipHour, samples, learned: true };
 }
 
 const INSIGHT_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -274,30 +327,15 @@ export function computeInsights(tasks: NTask[]): Insights {
   const max = Math.max(1, ...counts.flat());
   const grid = counts.map((row) => row.map((c) => c / max));
 
-  // peak 2-hour window (weekdays) with the most completions
-  let peakStart = 9;
-  let peakCount = 0;
-  for (let h = 7; h <= 18; h++) {
-    const hi = INSIGHT_HOURS.indexOf(h);
-    const hi2 = INSIGHT_HOURS.indexOf(h + 1);
-    const c = (hi >= 0 ? sumWeekday(counts[hi]) : 0) + (hi2 >= 0 ? sumWeekday(counts[hi2]) : 0);
-    if (c > peakCount) {
-      peakCount = c;
-      peakStart = h;
-    }
-  }
-
-  // dip: working hour (8..17) with the fewest completions
-  let dipHour = 13;
-  let dipCount = Infinity;
-  for (let h = 8; h <= 17; h++) {
-    const hi = INSIGHT_HOURS.indexOf(h);
-    const c = hi >= 0 ? sumWeekday(counts[hi]) : 0;
-    if (c < dipCount) {
-      dipCount = c;
-      dipHour = h;
-    }
-  }
+  // peak/dip come from the learned energy profile, so Insights and the
+  // scheduler agree on where the user's focus actually falls
+  const profile = deriveEnergyProfile(tasks);
+  const peakStart = profile.peakStart;
+  const dipHour = profile.dipHour;
+  const idx = (h: number) => INSIGHT_HOURS.indexOf(h);
+  const peakCount =
+    (idx(peakStart) >= 0 ? sumWeekday(counts[idx(peakStart)]) : 0) +
+    (idx(peakStart + 1) >= 0 ? sumWeekday(counts[idx(peakStart + 1)]) : 0);
 
   const locTotal = Object.values(placeCount).reduce((a, b) => a + b, 0) || 1;
   const locations = Object.entries(placeCount)
@@ -325,6 +363,7 @@ export function computeInsights(tasks: NTask[]): Insights {
     adminDay,
     bestWhen,
     topPlace,
+    profile,
   };
 }
 

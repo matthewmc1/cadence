@@ -29,14 +29,14 @@ function Avatars({ people }: { people?: { initial: string; color: string }[] }) 
 }
 
 export function PlanView() {
-  const { planMode, planLabel, isThisWeek, week, month, backlog, backlogTotal, selectedBacklogId, highlightTaskId } = useApp();
+  const { planMode, planLabel, isThisWeek, week, month, backlog, backlogTotal, selectedBacklogId, highlightTaskId, energyProfile } = useApp();
   const { selectBacklog, placeBacklog, openEditor, planPrev, planNext, planToday, setPlanMode } = useActions();
 
   const selected = backlog.find((b) => b.id === selectedBacklogId) ?? null;
   const others = backlog.filter((b) => b.id !== selectedBacklogId);
   const hiddenCount = Math.max(0, backlogTotal - backlog.length);
 
-  const primary = selected ? bestSlot(selected.kind, 0) : null;
+  const primary = selected ? bestSlot(selected.kind, 0, energyProfile) : null;
   const altDay = primary && primary.dayIndex !== 4 ? 4 : 1;
 
   return (
@@ -107,7 +107,7 @@ export function PlanView() {
                 <span className="rail__item-row">
                   <span className="dot" style={{ width: 7, height: 7, background: KINDS[b.kind].dot }} />
                   <span className="rail__item-title">{b.title}</span>
-                  <span className={'rail__item-tag' + (b.urgent ? ' rail__item-tag--urgent' : '')}>{b.tag}</span>
+                  <span className={'rail__item-tag' + (b.urgent ? ' rail__item-tag--urgent' : b.important ? ' rail__item-tag--important' : '')}>{b.tag}</span>
                 </span>
                 {b.project && (
                   <span className="rail__item-proj" style={{ color: b.project.color }}>
@@ -157,7 +157,7 @@ export function PlanView() {
                     </div>
 
                     <div className="plan__col">
-                      <DayCurve scale={day.scale} weekend={day.weekend} />
+                      <DayCurve scale={day.scale} weekend={day.weekend} profile={energyProfile} />
 
                       {isPrimary && primary && selected && (
                         <button

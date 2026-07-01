@@ -234,10 +234,11 @@ server.registerTool(
       deadline: z.string().optional().describe('Hard deadline (ISO date)'),
       effortMinutes: z.number().optional(),
       urgent: z.boolean().optional(),
+      important: z.boolean().optional().describe('Important (Eisenhower): protects deep, long-term work — not the same as urgent'),
       note: z.string().optional(),
     },
   },
-  async ({ title, kind, project, when, hour, recurrence, deadline, effortMinutes, urgent, note }) => {
+  async ({ title, kind, project, when, hour, recurrence, deadline, effortMinutes, urgent, important, note }) => {
     try {
       const boot = await api.bootstrap();
       const proj = resolveProject(project, boot.projects);
@@ -252,6 +253,7 @@ server.registerTool(
         deadline: deadline ? new Date(deadline).toISOString() : undefined,
         effortMinutes,
         urgent,
+        important,
         note,
       });
       return text(`✅ Created:\n${taskLine(task, proj ? [proj] : boot.projects)}`);

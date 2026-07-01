@@ -208,6 +208,9 @@ func (s *Store) CreateTask(_ context.Context, tenantID, actorID string, in domai
 	if in.Urgent != nil {
 		t.Urgent = *in.Urgent
 	}
+	if in.Important != nil {
+		t.Important = *in.Important
+	}
 	if in.Position != nil {
 		t.Position = *in.Position
 	}
