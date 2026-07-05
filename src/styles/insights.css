@@ -185,3 +185,138 @@
     flex-direction: column;
   }
 }
+
+/* ---- Signals: prescriptive "needs attention" cards ---- */
+.signals {
+  margin-top: 26px;
+}
+.signals__head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+  margin-bottom: 10px;
+}
+.signals__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 13px 15px 13px 16px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--r-md, 10px);
+}
+.signal--act {
+  border-left-color: var(--accent);
+  background: var(--fill-warm);
+}
+.signal--watch {
+  border-left-color: var(--slate);
+}
+.signal--click {
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.signal--click:hover {
+  background: var(--fill);
+}
+.signal--act.signal--click:hover {
+  background: #F3E4D3;
+}
+.signal__title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.signal__detail {
+  font-size: 12px;
+  color: var(--ink-4);
+  line-height: 1.45;
+}
+
+/* ---- Recently shipped: what got done + what it advanced ---- */
+.shipped {
+  margin-top: 34px;
+}
+.shipped__head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.shipped__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.shipped__sub {
+  font-size: 12.5px;
+  color: var(--ink-5);
+}
+.shipped__list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.shipped__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 15px;
+  border-top: 1px solid var(--line-2);
+}
+.shipped__row:first-child {
+  border-top: none;
+}
+.shipped__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  flex-shrink: 0;
+}
+.shipped__proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.shipped__reflect {
+  flex: 1;
+  min-width: 0;
+  margin-left: auto;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--ink);
+  padding: 3px 2px;
+  outline: none;
+  text-align: right;
+}
+.shipped__reflect::placeholder {
+  color: var(--ink-5);
+  font-style: italic;
+}
+.shipped__reflect:hover {
+  border-bottom-color: var(--line);
+}
+.shipped__reflect:focus {
+  border-bottom-color: var(--accent);
+  text-align: left;
+}

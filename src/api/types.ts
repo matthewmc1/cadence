@@ -15,6 +15,7 @@ export interface Task {
   urgent: boolean;
   important: boolean; // Eisenhower's second axis — protects deep, long-term work
   note: string;
+  reflection: string; // "what did this advance?" captured at completion
   place: string | null;
   scheduledAt: string | null; // absolute ISO datetime the task is planned for
   position: number;
@@ -123,6 +124,7 @@ export interface CreateTaskInput {
   urgent?: boolean;
   important?: boolean;
   note?: string;
+  reflection?: string;
   place?: string | null;
   scheduledAt?: string | null;
   position?: number;
@@ -142,6 +144,7 @@ export type TaskPatch = Partial<{
   urgent: boolean;
   important: boolean;
   note: string;
+  reflection: string;
   projectId: string | null;
   place: string | null;
   scheduledAt: string | null;

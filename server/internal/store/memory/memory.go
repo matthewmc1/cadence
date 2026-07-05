@@ -199,6 +199,7 @@ func (s *Store) CreateTask(_ context.Context, tenantID, actorID string, in domai
 		Status:        status,
 		EffortMinutes: effort,
 		Note:          deref(in.Note),
+		Reflection:    deref(in.Reflection),
 		Place:         in.Place,
 		ScheduledAt:   in.ScheduledAt,
 		Version:       1,

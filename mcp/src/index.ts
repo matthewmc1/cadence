@@ -295,6 +295,7 @@ server.registerTool(
       deadline: z.string().optional().describe('ISO date, or "none" to clear'),
       urgent: z.boolean().optional(),
       note: z.string().optional(),
+      reflection: z.string().optional().describe('What outcome finishing this advanced — the "done and why" note'),
     },
   },
   async (args) => {
@@ -308,6 +309,7 @@ server.registerTool(
       if (args.recurrence !== undefined) patch.recurrence = args.recurrence;
       if (args.urgent !== undefined) patch.urgent = args.urgent;
       if (args.note !== undefined) patch.note = args.note;
+      if (args.reflection !== undefined) patch.reflection = args.reflection;
       if (args.project !== undefined) patch.projectId = args.project.toLowerCase() === 'none' ? null : resolveProject(args.project, boot.projects)?.id ?? null;
       if (args.when !== undefined) patch.scheduledAt = args.when.toLowerCase() === 'none' ? null : parseWhen(args.when, args.hour);
       if (args.deadline !== undefined) patch.deadline = args.deadline.toLowerCase() === 'none' ? null : new Date(args.deadline).toISOString();
@@ -324,14 +326,19 @@ server.registerTool(
   'complete_task',
   {
     title: 'Complete a task',
-    description: 'Mark a task done (by id or #handle).',
-    inputSchema: { id: z.string() },
+    description: 'Mark a task done (by id or #handle). Optionally capture what outcome it advanced.',
+    inputSchema: {
+      id: z.string(),
+      reflection: z.string().optional().describe('What outcome finishing this advanced — the "done and why" note'),
+    },
   },
-  async ({ id }) => {
+  async ({ id, reflection }) => {
     try {
       const boot = await api.bootstrap();
-      const task = await api.updateTask(resolveTaskId(id, boot.tasks), { status: 'done' });
-      return text(`✅ Done: **${task.title}**`);
+      const patch: Record<string, unknown> = { status: 'done' };
+      if (reflection !== undefined) patch.reflection = reflection;
+      const task = await api.updateTask(resolveTaskId(id, boot.tasks), patch);
+      return text(`✅ Done: **${task.title}**${reflection ? `\n   — advanced: ${reflection}` : ''}`);
     } catch (e) {
       return fail(e);
     }

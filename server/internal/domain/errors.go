@@ -38,6 +38,7 @@ type CreateTaskInput struct {
 	Urgent        *bool      `json:"urgent"`
 	Important     *bool      `json:"important"`
 	Note          *string    `json:"note"`
+	Reflection    *string    `json:"reflection"`
 	Place         *string    `json:"place"`
 	ScheduledAt   *time.Time `json:"scheduledAt"`
 	Position      *float64   `json:"position"`

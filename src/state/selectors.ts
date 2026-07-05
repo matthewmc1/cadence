@@ -375,3 +375,143 @@ function argmax(a: number[]): number {
   for (let i = 1; i < a.length; i++) if (a[i] > a[mi]) mi = i;
   return mi;
 }
+
+/* -------------------------------------------------------------- Signals */
+
+/**
+ * A prescriptive nudge — something that needs attention, computed from data
+ * already on the tasks. Unlike Insights (which describes the past), a Signal
+ * tells you what to *do* now to protect long-horizon work.
+ */
+export interface Signal {
+  id: string;
+  kind: 'act' | 'watch'; // act = accent (do it), watch = quieter heads-up
+  title: string; // imperative headline
+  detail: string; // one line of why
+  taskId?: string; // optional deep-link to the task it's about
+}
+
+// Thresholds (kept here so a later effort-budget model can supersede them).
+const SLIP_AGING_DAYS = 3;
+const STALL_DAYS = 10;
+const WEEKLY_DEEP_BUDGET_HRS = 15; // ~3h/day × 5 — the scarce deep-focus capacity
+
+/**
+ * Turn the current task set into a short list of actionable signals. Everything
+ * here is derived from fields already present (important/urgent, projectId,
+ * scheduledAt, doneAt, effortMinutes) — no new data required.
+ */
+export function computeSignals(tasks: NTask[], projects: NProject[], profile: EnergyProfile, now: Date): Signal[] {
+  const out: Signal[] = [];
+  // whole calendar days elapsed (both floored to local midnight, like startOfWeek/Month)
+  const midnight = (ms: number) => {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  const nowMid = midnight(now.getTime());
+  const dSince = (ms: number) => Math.round((nowMid - midnight(ms)) / 86400000);
+  const weekStart = startOfWeek(now);
+  const weekEnd = addDays(weekStart, 7);
+
+  // 1) important, non-urgent work aging unscheduled in the backlog — the exact
+  //    long-horizon work that gets crowded out. Flag it, and note if urgent
+  //    work is currently occupying the peak it should be in.
+  const urgentInPeak = tasks.some((t) => {
+    if (t.status === 'done' || !t.urgent || !t.scheduledAt) return false;
+    return occurrences(t.scheduledAt, t.recurrence, weekStart, weekEnd).some((d) => {
+      const h = hourOf(d);
+      return h >= profile.peakStart && h < profile.peakEnd;
+    });
+  });
+  const slipping = tasks
+    .filter((t) => t.status === 'backlog' && t.scheduledAt == null && t.important && !t.urgent && dSince(new Date(t.createdAt).getTime()) >= SLIP_AGING_DAYS)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  slipping.slice(0, 2).forEach((t, i) => {
+    const age = dSince(new Date(t.createdAt).getTime()); // always ≥ SLIP_AGING_DAYS (3), so plural
+    // only the first (oldest) card carries the peak-contention note, to avoid repeating it
+    const peakNote = i === 0 && urgentInPeak ? ', while urgent work fills your peak this week' : '';
+    out.push({
+      id: 'slip:' + t.id,
+      kind: 'act',
+      title: `Give “${t.title}” a peak slot`,
+      detail: `Important, not urgent — waiting ${age} days in the backlog${peakNote}.`,
+      taskId: t.id,
+    });
+  });
+
+  // 2) projects with open work but no recent completion — strategic drift.
+  const stalled: { p: NProject; idle: number; deepLeft: number; hasDone: boolean }[] = [];
+  for (const p of projects) {
+    const items = tasks.filter((t) => t.projectId === p.id);
+    const open = items.filter((t) => t.status !== 'done');
+    if (!open.length) continue;
+    const doneMs = items.filter((t) => t.doneAt).map((t) => new Date(t.doneAt as string).getTime());
+    const oldestOpen = Math.min(...open.map((t) => new Date(t.createdAt).getTime()));
+    const hasDone = doneMs.length > 0;
+    // a project can't be "idle" longer than it has existed — clamp to project age
+    const projAge = dSince(new Date(p.createdAt).getTime());
+    const idle = Math.min(hasDone ? dSince(Math.max(...doneMs)) : dSince(oldestOpen), projAge);
+    const deepLeft = open.filter((t) => t.kind === 'deep').length;
+    if (idle >= STALL_DAYS && deepLeft > 0) stalled.push({ p, idle, deepLeft, hasDone });
+  }
+  stalled.sort((a, b) => b.idle - a.idle);
+  for (const s of stalled.slice(0, 2)) {
+    const lead = s.hasDone ? `No completed work in ${s.idle} days` : `No completed work yet · oldest task waiting ${s.idle} days`;
+    out.push({
+      id: 'stall:' + s.p.id,
+      kind: 'watch',
+      title: `“${s.p.name}” is stalling`,
+      detail: `${lead} · ${s.deepLeft} deep task${s.deepLeft === 1 ? '' : 's'} still waiting.`,
+    });
+  }
+
+  // 3) this week scheduled over the realistic deep-focus budget — overcommitment.
+  const deepMins = tasks.reduce((sum, t) => {
+    if (t.status === 'done' || t.kind !== 'deep' || !t.scheduledAt) return sum;
+    return sum + occurrences(t.scheduledAt, t.recurrence, weekStart, weekEnd).length * t.effortMinutes;
+  }, 0);
+  const deepHrs = deepMins / 60;
+  if (deepHrs > WEEKLY_DEEP_BUDGET_HRS) {
+    out.push({
+      id: 'overload:week',
+      kind: 'act',
+      title: 'This week is over your focus budget',
+      detail: `${Math.round(deepHrs * 10) / 10}h of deep work scheduled vs ~${WEEKLY_DEEP_BUDGET_HRS}h you can realistically protect — defer or delegate some.`,
+    });
+  }
+
+  return out;
+}
+
+/* ---------------------------------------------------------- Recently shipped */
+
+/** A completed task, with its "what it advanced" reflection and project. */
+export interface DoneItem {
+  id: string;
+  title: string;
+  kind: Kind;
+  doneAt: string;
+  reflection: string;
+  project?: { name: string; color: string };
+}
+
+/** The most recent completions — the "what got done, and why" review surface. */
+export function selectRecentDone(tasks: NTask[], projects: NProject[] = [], limit = 8): DoneItem[] {
+  const projById = new Map(projects.map((p) => [p.id, p]));
+  return tasks
+    .filter((t) => t.status === 'done' && t.doneAt)
+    .sort((a, b) => new Date(b.doneAt as string).getTime() - new Date(a.doneAt as string).getTime())
+    .slice(0, limit)
+    .map((t) => {
+      const p = t.projectId ? projById.get(t.projectId) : undefined;
+      return {
+        id: t.id,
+        title: t.title,
+        kind: t.kind,
+        doneAt: t.doneAt as string,
+        reflection: t.reflection,
+        project: p ? { name: p.name, color: p.color } : undefined,
+      };
+    });
+}

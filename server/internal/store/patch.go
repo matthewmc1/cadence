@@ -75,6 +75,14 @@ func ApplyTaskPatch(t *domain.Task, patch map[string]any, now time.Time) error {
 			} else {
 				return domain.Invalid("note", "must be a string")
 			}
+		case "reflection":
+			if v == nil {
+				t.Reflection = ""
+			} else if s, ok := v.(string); ok {
+				t.Reflection = s
+			} else {
+				return domain.Invalid("reflection", "must be a string")
+			}
 		case "projectId":
 			p, err := nullableString(v, "projectId")
 			if err != nil {

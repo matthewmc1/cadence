@@ -29,6 +29,7 @@ export interface Task {
   urgent: boolean;
   important: boolean;
   note: string;
+  reflection: string;
   place: string | null;
   scheduledAt: string | null;
   deadline: string | null;

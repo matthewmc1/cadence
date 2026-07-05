@@ -1,10 +1,14 @@
 import '../styles/insights.css';
-import { useApp } from '../state/store';
+import { useEffect, useRef, useState } from 'react';
+import { useApp, useActions } from '../state/store';
+import { KINDS } from '../lib/energy';
 import { Eyebrow } from '../components/primitives';
 import { Heatmap } from '../components/Heatmap';
+import type { DoneItem } from '../state/selectors';
 
 export function InsightsView() {
-  const { insights } = useApp();
+  const { insights, signals, recentDone } = useApp();
+  const { openEditor, setReflection } = useActions();
   const { peak, dip, locations, heroDay, adminDay, bestWhen, topPlace } = insights;
 
   return (
@@ -13,6 +17,27 @@ export function InsightsView() {
         <Eyebrow>What Cadence learned</Eyebrow>
         <span className="insights__since">{insights.total ? `From ${insights.total} completed tasks` : 'No completed tasks yet'}</span>
       </div>
+
+      {signals.length > 0 && (
+        <section className="signals" aria-label="Needs attention">
+          <div className="signals__head">Needs attention</div>
+          <div className="signals__list">
+            {signals.map((s) =>
+              s.taskId ? (
+                <button key={s.id} className={'signal signal--' + s.kind + ' signal--click'} onClick={() => openEditor(s.taskId!)}>
+                  <span className="signal__title">{s.title}</span>
+                  <span className="signal__detail">{s.detail}</span>
+                </button>
+              ) : (
+                <div key={s.id} className={'signal signal--' + s.kind}>
+                  <span className="signal__title">{s.title}</span>
+                  <span className="signal__detail">{s.detail}</span>
+                </div>
+              ),
+            )}
+          </div>
+        </section>
+      )}
       {insights.total === 0 ? (
         <h1 className="insights__title serif">Your patterns will appear as you finish work.</h1>
       ) : (
@@ -101,6 +126,59 @@ export function InsightsView() {
           </section>
         </div>
       </div>
+
+      {recentDone.length > 0 && (
+        <section className="shipped">
+          <div className="shipped__head">
+            <span className="shipped__title">Recently shipped</span>
+            <span className="shipped__sub">what you finished — note what each advanced</span>
+          </div>
+          <div className="shipped__list">
+            {recentDone.map((d) => (
+              <ShippedRow key={d.id} item={d} onReflect={(text) => setReflection(d.id, text)} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function ShippedRow({ item, onReflect }: { item: DoneItem; onReflect: (text: string) => void }) {
+  const [text, setText] = useState(item.reflection);
+  // don't reset an in-progress edit: only pull in external changes while the field is untouched
+  const dirty = useRef(false);
+  useEffect(() => {
+    if (!dirty.current) setText(item.reflection);
+  }, [item.reflection]);
+  const commit = () => {
+    dirty.current = false;
+    if (text.trim() !== item.reflection.trim()) onReflect(text.trim());
+  };
+  return (
+    <div className="shipped__row">
+      <span className="dot" style={{ width: 7, height: 7, background: KINDS[item.kind].dot }} />
+      <span className="shipped__name">{item.title}</span>
+      {item.project && (
+        <span className="shipped__proj" style={{ color: item.project.color }}>
+          <span className="dot" style={{ width: 5, height: 5, background: item.project.color }} />
+          {item.project.name}
+        </span>
+      )}
+      <input
+        className="shipped__reflect"
+        value={text}
+        onChange={(e) => {
+          dirty.current = true;
+          setText(e.target.value);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="what did this advance?"
+        aria-label={`What “${item.title}” advanced`}
+      />
     </div>
   );
 }

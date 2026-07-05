@@ -91,6 +91,7 @@ type Task struct {
 	Urgent        bool       `json:"urgent"`
 	Important     bool       `json:"important"` // the "important" axis (Eisenhower): protects deep long-term work
 	Note          string     `json:"note"`
+	Reflection    string     `json:"reflection"` // "what did this advance?" — captured at completion (done-and-why)
 	Place         *string    `json:"place"`
 	ScheduledAt   *time.Time `json:"scheduledAt"` // absolute datetime the task is planned for
 	Position      float64    `json:"position"`    // ordering within a column/list

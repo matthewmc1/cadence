@@ -11,7 +11,7 @@ import type { Task as NTask, Project as NProject, ServerEvent, TaskPatch, Create
 import { api, realtimeURL, ApiError } from '../api/client';
 import { connectRealtime, type ConnState } from '../api/realtime';
 import { inferTask, bestSlot, type Kind, type EnergyProfile } from '../lib/energy';
-import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, deriveEnergyProfile, priorityScore, clock, type Insights } from './selectors';
+import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, computeSignals, selectRecentDone, deriveEnergyProfile, priorityScore, clock, type Insights, type Signal, type DoneItem } from './selectors';
 import { computeNow, computeWeek, startOfWeek, addDays, ymd, combine, sameDay, occurrences } from '../lib/time';
 import type { SchedTask, WeekCtx, Assignment } from '../ai/scheduler';
 import type { View, Now, TodayItem, WeekDay, MonthGrid, BacklogTask, Project } from './types';
@@ -203,6 +203,8 @@ export interface AppState {
   selectedProjectId: string | null;
   people: { userId: string; initial: string; color: string }[];
   insights: Insights;
+  signals: Signal[];
+  recentDone: DoneItem[];
   energyProfile: EnergyProfile;
   editorOpen: boolean;
   editorMode: 'edit' | 'create' | null;
@@ -254,6 +256,8 @@ function derive(s: RawState): AppState {
     selectedProjectId: activeProject?.id ?? null,
     people: [...peopleMap.values()],
     insights,
+    signals: computeSignals(s.tasks, s.projects, insights.profile, new Date()),
+    recentDone: selectRecentDone(s.tasks, s.projects),
     energyProfile: insights.profile,
     editorOpen: s.editorMode != null,
     editorMode: s.editorMode,
@@ -289,6 +293,7 @@ export interface Actions {
   openCreate: () => void;
   closeEditor: () => void;
   saveTask: (id: string, patch: TaskPatch) => Promise<void>;
+  setReflection: (id: string, text: string) => void;
   createTaskFull: (input: CreateTaskInput) => Promise<void>;
   createProject: (name: string, subtitle?: string) => void;
   selectProject: (id: string) => void;
@@ -667,6 +672,11 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       await patchTask(id, patch, patch as Partial<NTask>);
       dispatch({ type: 'CLOSE_EDITOR' });
       toast('Saved');
+    },
+
+    // silent inline patch of the "what it advanced" reflection (Insights review)
+    setReflection: (id, text) => {
+      void patchTask(id, { reflection: text }, { reflection: text });
     },
 
     createTaskFull: async (input) => {

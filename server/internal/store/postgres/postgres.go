@@ -98,7 +98,7 @@ func (s *Store) withTenant(ctx context.Context, tenantID string, fn func(context
 }
 
 const taskCols = `tenant_id::text, id::text, project_id::text, title, kind::text, status::text,
-	effort_minutes, urgent, important, note, place, scheduled_at,
+	effort_minutes, urgent, important, note, reflection, place, scheduled_at,
 	position, done_at, deadline, recurrence, links, subtasks, assignees, version, created_at, updated_at`
 
 type taskRow struct {
@@ -112,6 +112,7 @@ type taskRow struct {
 	Urgent        bool       `db:"urgent"`
 	Important     bool       `db:"important"`
 	Note          string     `db:"note"`
+	Reflection    string     `db:"reflection"`
 	Place         *string    `db:"place"`
 	ScheduledAt   *time.Time `db:"scheduled_at"`
 	Position      float64    `db:"position"`
@@ -130,7 +131,7 @@ func (r taskRow) toTask() domain.Task {
 	t := domain.Task{
 		ID: r.ID, TenantID: r.TenantID, ProjectID: r.ProjectID, Title: r.Title,
 		Kind: domain.Kind(r.Kind), Status: domain.Status(r.Status), EffortMinutes: r.EffortMinutes,
-		Urgent: r.Urgent, Important: r.Important, Note: r.Note, Place: r.Place, ScheduledAt: r.ScheduledAt,
+		Urgent: r.Urgent, Important: r.Important, Note: r.Note, Reflection: r.Reflection, Place: r.Place, ScheduledAt: r.ScheduledAt,
 		Position: r.Position, DoneAt: r.DoneAt, Deadline: r.Deadline, Recurrence: r.Recurrence,
 		Version: r.Version, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -351,7 +352,7 @@ func (s *Store) CreateTask(ctx context.Context, tenantID, actorID string, in dom
 	now := time.Now().UTC()
 	t := domain.Task{
 		ID: domain.NewID(), TenantID: tenantID, ProjectID: in.ProjectID, Title: title,
-		Kind: kind, Status: status, EffortMinutes: effort, Note: deref(in.Note), Place: in.Place,
+		Kind: kind, Status: status, EffortMinutes: effort, Note: deref(in.Note), Reflection: deref(in.Reflection), Place: in.Place,
 		ScheduledAt: in.ScheduledAt,
 		Version:     1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -416,12 +417,12 @@ func (s *Store) UpdateTask(ctx context.Context, tenantID, actorID, id string, pa
 				project_id = $2, title = $3, kind = $4::task_kind, status = $5::task_status,
 				effort_minutes = $6, urgent = $7, note = $8, place = $9,
 				scheduled_at = $10, position = $11, done_at = $12, deadline = $13, recurrence = $14,
-				links = $15::jsonb, subtasks = $16::jsonb, assignees = $17::jsonb, version = $18, important = $19
+				links = $15::jsonb, subtasks = $16::jsonb, assignees = $17::jsonb, version = $18, important = $19, reflection = $20
 			WHERE id = $1`,
 			id, next.ProjectID, next.Title, string(next.Kind), string(next.Status), next.EffortMinutes,
 			next.Urgent, next.Note, next.Place, next.ScheduledAt,
 			next.Position, next.DoneAt, next.Deadline, next.Recurrence,
-			jsonArr(next.Links), jsonArr(next.Subtasks), jsonArr(next.Assignees), next.Version, next.Important); err != nil {
+			jsonArr(next.Links), jsonArr(next.Subtasks), jsonArr(next.Assignees), next.Version, next.Important, next.Reflection); err != nil {
 			return err
 		}
 		got, err := getTaskTx(ctx, tx, id, false)
@@ -459,15 +460,15 @@ func insertTask(ctx context.Context, tx pgx.Tx, t domain.Task) error {
 		INSERT INTO tasks (
 			tenant_id, id, project_id, title, kind, status, effort_minutes, urgent, note, place,
 			scheduled_at, position, done_at,
-			deadline, recurrence, links, subtasks, assignees, version, created_at, updated_at, important
+			deadline, recurrence, links, subtasks, assignees, version, created_at, updated_at, important, reflection
 		) VALUES (
 			$1, $2, $3, $4, $5::task_kind, $6::task_status, $7, $8, $9, $10,
 			$11, $12, $13,
-			$14, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19, $20, $21, $22
+			$14, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19, $20, $21, $22, $23
 		)`,
 		t.TenantID, t.ID, t.ProjectID, t.Title, string(t.Kind), string(t.Status), t.EffortMinutes, t.Urgent, t.Note, t.Place,
 		t.ScheduledAt, t.Position, t.DoneAt,
-		t.Deadline, t.Recurrence, jsonArr(t.Links), jsonArr(t.Subtasks), jsonArr(t.Assignees), t.Version, t.CreatedAt, t.UpdatedAt, t.Important)
+		t.Deadline, t.Recurrence, jsonArr(t.Links), jsonArr(t.Subtasks), jsonArr(t.Assignees), t.Version, t.CreatedAt, t.UpdatedAt, t.Important, t.Reflection)
 	return err
 }
 

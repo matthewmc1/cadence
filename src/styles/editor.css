@@ -284,6 +284,21 @@
   border-color: var(--line-strong);
 }
 
+.editor__input {
+  width: 100%;
+  font-size: 13.5px;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 9px 12px;
+  background: var(--paper-2);
+  color: var(--ink);
+  outline: none;
+}
+.editor__input:focus {
+  border-color: var(--line-strong);
+}
+
 .editor__subs {
   display: flex;
   flex-direction: column;

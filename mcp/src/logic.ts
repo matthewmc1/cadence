@@ -124,6 +124,7 @@ export function taskLine(t: Task, projects: Project[], at?: Date): string {
   if (t.urgent) bits.push('🔴 urgent');
   if (t.important) bits.push('⭐ important');
   if (t.place) bits.push(`· ${t.place}`);
+  if (t.status === 'done' && t.reflection) bits.push(`— advanced: ${t.reflection}`);
   const subs = t.subtasks.length ? ` (${t.subtasks.filter((s) => s.done).length}/${t.subtasks.length} subtasks)` : '';
   const who = t.assignees.length ? ` 👥 ${t.assignees.map((a) => a.initial).join(',')}` : '';
   // UUIDv7 ids share a timestamp prefix, so the unique part is the suffix.

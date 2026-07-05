@@ -16,6 +16,7 @@ interface Form {
   urgent: boolean;
   important: boolean;
   note: string;
+  reflection: string;
   projectId: string | null;
   place: string | null;
   scheduledDate: string; // yyyy-mm-dd, '' = unscheduled
@@ -40,7 +41,7 @@ const RECUR: Recurrence[] = ['none', 'daily', 'weekdays', 'weekly', 'monthly'];
 
 function blankForm(): Form {
   return {
-    title: '', kind: 'light', status: 'backlog', effortMinutes: 40, urgent: false, important: false, note: '',
+    title: '', kind: 'light', status: 'backlog', effortMinutes: 40, urgent: false, important: false, note: '', reflection: '',
     projectId: null, place: null, scheduledDate: '', scheduledHour: 9,
     deadline: null, recurrence: 'none', links: [], subtasks: [], assigneeIds: [],
   };
@@ -76,7 +77,7 @@ export function TaskEditor() {
       const t = editingTask;
       setForm({
         title: t.title, kind: t.kind, status: t.status, effortMinutes: t.effortMinutes, urgent: t.urgent, important: t.important,
-        note: t.note, projectId: t.projectId, place: t.place,
+        note: t.note, reflection: t.reflection, projectId: t.projectId, place: t.place,
         scheduledDate: t.scheduledAt ? ymd(new Date(t.scheduledAt)) : '',
         scheduledHour: t.scheduledAt ? hourOf(new Date(t.scheduledAt)) : 9,
         deadline: t.deadline, recurrence: t.recurrence,
@@ -122,7 +123,7 @@ export function TaskEditor() {
     const scheduledAt = form.scheduledDate ? combine(form.scheduledDate, form.scheduledHour) : null;
     const common = {
       title, kind: form.kind, status: form.status, effortMinutes: form.effortMinutes, urgent: form.urgent, important: form.important,
-      note: form.note, projectId: form.projectId, place: form.place, scheduledAt,
+      note: form.note, reflection: form.reflection, projectId: form.projectId, place: form.place, scheduledAt,
       deadline: form.deadline, recurrence: form.recurrence, links: form.links, subtasks: form.subtasks, assignees,
     };
 
@@ -316,6 +317,17 @@ export function TaskEditor() {
               rows={2}
             />
           </Field>
+
+          {form.status === 'done' && (
+            <Field label="What it advanced">
+              <input
+                className="editor__input"
+                value={form.reflection}
+                onChange={(e) => set('reflection', e.target.value)}
+                placeholder="What outcome did finishing this move forward?"
+              />
+            </Field>
+          )}
 
           <Field label={`Subtasks${form.subtasks.length ? ` · ${doneSubs}/${form.subtasks.length}` : ''}`}>
             <div className="editor__subs">
