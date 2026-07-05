@@ -275,6 +275,7 @@ export interface Actions {
   go: (view: View) => void;
   setDraft: (title: string) => void;
   scheduleDraft: () => void;
+  quickCapture: (title: string, opts?: { schedule?: boolean; important?: boolean; urgent?: boolean }) => void;
   toggleToday: (id: string) => void;
   selectBacklog: (id: string | null) => void;
   placeBacklog: (id: string, dayIndex: number, hour: number) => void;
@@ -495,6 +496,37 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
           toast(`Scheduled · ${slot.dayName} ${clock(slot.hour)} · ${slot.place}`);
         })
         .catch((e) => toast(e instanceof ApiError ? e.message : 'Could not schedule'));
+    },
+
+    // Global quick-capture: infer a task's shape from its title and drop it
+    // straight into the backlog — or, with `schedule`, into its best-fit slot.
+    quickCapture: (title, opts = {}) => {
+      const clean = title.trim();
+      if (!clean) return;
+      const inf = inferTask(clean);
+      const input: CreateTaskInput = {
+        title: clean,
+        kind: inf.kind,
+        status: opts.schedule ? 'scheduled' : 'backlog',
+        effortMinutes: Math.round(inf.effortHrs * 60),
+        important: opts.important ?? false,
+        urgent: opts.urgent ?? false,
+      };
+      const slot = opts.schedule ? bestSlot(inf.kind, 0, profileNow()) : null;
+      if (slot) {
+        input.scheduledAt = slotISO(slot.dayIndex, slot.hour);
+        input.place = slot.place;
+        dispatch({ type: 'SET_VIEW', view: 'plan' });
+      }
+      api
+        .createTask(input)
+        .then((task) => {
+          dispatch({ type: 'UPSERT_TASK', task });
+          dispatch({ type: 'SET_HIGHLIGHT', id: task.id });
+          if (slot) toast(`Scheduled · ${slot.dayName} ${clock(slot.hour)} · ${slot.place}`);
+          else toast(`Captured · ${clean}`);
+        })
+        .catch((e) => toast(e instanceof ApiError ? e.message : 'Could not capture'));
     },
 
     toggleToday: (id) => {

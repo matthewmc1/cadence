@@ -71,7 +71,9 @@ function renderFocus(boot: Bootstrap): string {
   const overdue = tasks.filter((t) => isOverdue(t, now)).sort((a, b) => +new Date(a.deadline!) - +new Date(b.deadline!));
   const inFocus = tasks.filter((t) => t.status === 'focus');
   const dueSoon = tasks.filter((t) => dueWithin(t, now, 3) && !sameDay(new Date(t.deadline!), now));
-  const urgent = tasks.filter((t) => t.urgent && t.status === 'backlog');
+  const important = tasks.filter((t) => t.important && t.status === 'backlog');
+  // importance outranks urgency (Eisenhower): a task that is both shows only under Important.
+  const urgent = tasks.filter((t) => t.urgent && !t.important && t.status === 'backlog');
 
   const energy = energyOf(now.getHours());
   const out: string[] = [];
@@ -99,6 +101,10 @@ function renderFocus(boot: Bootstrap): string {
     out.push(`\n## ⏰ Due soon (next 3 days)`);
     dueSoon.forEach((t) => out.push(taskLine(t, projects)));
   }
+  if (important.length) {
+    out.push(`\n## ⭐ Important in backlog`);
+    important.forEach((t) => out.push(taskLine(t, projects)));
+  }
   if (urgent.length) {
     out.push(`\n## ⚡ Urgent in backlog`);
     urgent.forEach((t) => out.push(taskLine(t, projects)));
@@ -110,9 +116,17 @@ function renderFocus(boot: Bootstrap): string {
     inFocus[0] ??
     today.find((d) => d.task.kind === 'deep' && energyOf(d.at.getHours()) === 'peak')?.task ??
     today[0]?.task ??
+    important[0] ??
     urgent[0];
   if (pick) {
-    out.push(`\n---\n**Suggested next:** ${pick.title}${overdue.includes(pick) ? ' (overdue)' : pick.kind === 'deep' && energy === 'peak' ? " — you're in your peak window for deep work" : ''}.`);
+    const why = overdue.includes(pick)
+      ? ' (overdue)'
+      : pick.important
+        ? ' — important, long-horizon work'
+        : pick.kind === 'deep' && energy === 'peak'
+          ? " — you're in your peak window for deep work"
+          : '';
+    out.push(`\n---\n**Suggested next:** ${pick.title}${why}.`);
   }
   return out.join('\n');
 }
@@ -162,7 +176,7 @@ server.registerTool(
   {
     title: 'What should I focus on?',
     description:
-      "The focus view: overdue work, what's in focus now, today's schedule (with energy-window notes), what's due soon, and urgent backlog — with a concrete suggestion for what to do next.",
+      "The focus view: overdue work, what's in focus now, today's schedule (with energy-window notes), what's due soon, and important & urgent backlog — with a concrete suggestion for what to do next.",
     inputSchema: {},
   },
   async () => {

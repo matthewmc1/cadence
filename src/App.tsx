@@ -5,6 +5,7 @@ import { AppHeader } from './components/AppHeader';
 import { Toast } from './components/Toast';
 import { TaskEditor } from './components/TaskEditor';
 import { TokensModal } from './components/TokensModal';
+import { QuickCapture } from './components/QuickCapture';
 import { LoginView } from './views/LoginView';
 import { TodayView } from './views/TodayView';
 import { InsightsView } from './views/InsightsView';
@@ -66,6 +67,7 @@ function Shell() {
       <Stage />
       <TaskEditor />
       <TokensModal />
+      <QuickCapture />
     </div>
   );
 }
