@@ -25,6 +25,101 @@ const ADVANCE_LABEL: Record<BoardColumn, string> = {
   done: '',
 };
 
+const TIER_LABEL: Record<string, string> = { a: 'A', b: 'B', c: 'C' };
+
+function ClientPicker({ projectId, clientId }: { projectId: string; clientId: string | null }) {
+  const { clients } = useApp();
+  const { assignProjectClient, createClientForProject } = useActions();
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const current = clients.find((c) => c.id === clientId) ?? null;
+  // archived clients aren't offered as new options, but a project already on one
+  // still needs it in the list so its current-assignment label resolves.
+  const options = clients.filter((c) => !c.archivedAt || c.id === clientId);
+
+  const pick = (id: string | null) => {
+    if (id !== clientId) assignProjectClient(projectId, id);
+    setOpen(false);
+  };
+  const submitNew = () => {
+    const n = name.trim();
+    if (!n) return;
+    createClientForProject(projectId, { name: n });
+    setName('');
+    setCreating(false);
+    setOpen(false);
+  };
+  const close = () => {
+    setOpen(false);
+    setCreating(false);
+    setName('');
+  };
+
+  return (
+    <div className="cpick" onKeyDown={(e) => { if (e.key === 'Escape') close(); }}>
+      <button
+        className={'cpick__btn' + (current ? '' : ' cpick__btn--empty')}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {current ? (
+          <>
+            <span className="dot" style={{ width: 7, height: 7, background: current.color }} />
+            {current.name}
+          </>
+        ) : (
+          '+ Assign client'
+        )}
+        <span className="cpick__caret">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="cpick__scrim" onClick={close} />
+          <div className="cpick__menu" role="menu">
+            {options.map((c) => (
+              <button key={c.id} role="menuitem" className={'cpick__item' + (c.id === clientId ? ' is-on' : '')} onClick={() => pick(c.id)}>
+                <span className="dot" style={{ width: 7, height: 7, background: c.color }} />
+                <span className="cpick__item-name">{c.name}</span>
+                <span className="cpick__tier">{TIER_LABEL[c.tier] ?? c.tier}</span>
+              </button>
+            ))}
+            {clientId && (
+              <button role="menuitem" className="cpick__item cpick__item--none" onClick={() => pick(null)}>
+                No client
+              </button>
+            )}
+            <div className="cpick__sep" />
+            {creating ? (
+              <div className="cpick__new">
+                <input
+                  autoFocus
+                  className="cpick__new-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') submitNew();
+                    if (e.key === 'Escape') close();
+                  }}
+                  placeholder="Client name"
+                />
+                <button className="cpick__new-go" onClick={submitNew}>
+                  Add
+                </button>
+              </div>
+            ) : (
+              <button role="menuitem" className="cpick__item cpick__add" onClick={() => setCreating(true)}>
+                + New client
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function BoardView() {
   const { project, projects, selectedProjectId, highlightTaskId } = useApp();
   const { moveBoard, autoScheduleRemaining, openEditor, selectProject, createProject } = useActions();
@@ -187,7 +282,10 @@ export function BoardView() {
         <header className="board__header">
           <div className="board__head-row">
             <div>
-              <div className="eyebrow">Project</div>
+              <div className="board__eyebrow-row">
+                <span className="eyebrow">Project</span>
+                <ClientPicker projectId={project.id} clientId={project.clientId} />
+              </div>
               <h1 className="board__name serif">{project.name}</h1>
               <p className="board__sub">{project.subtitle}</p>
             </div>

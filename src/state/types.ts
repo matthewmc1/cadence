@@ -97,6 +97,7 @@ export interface BoardTask {
 
 export interface Project {
   id: string;
+  clientId: string | null;
   name: string;
   subtitle: string;
   due: string;

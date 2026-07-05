@@ -1,4 +1,4 @@
-import type { ApiTokenInfo, Bootstrap, CreateTaskInput, Project, Task, TaskPatch, User } from './types';
+import type { ApiTokenInfo, Bootstrap, Client, CreateClientInput, CreateTaskInput, Project, Task, TaskPatch, User } from './types';
 
 /**
  * Base URL of the Cadence API. Override with VITE_API_URL at build time; the
@@ -66,11 +66,16 @@ export const api = {
     request<Task>('PATCH', `/api/v1/tasks/${id}`, patch, version != null ? { 'If-Match': String(version) } : undefined),
   deleteTask: (id: string) => request<void>('DELETE', `/api/v1/tasks/${id}`),
 
-  createProject: (input: { name: string; subtitle?: string; due?: string | null; color?: string }) =>
+  createProject: (input: { name: string; subtitle?: string; due?: string | null; color?: string; clientId?: string | null }) =>
     request<Project>('POST', '/api/v1/projects', input),
   updateProject: (id: string, patch: Record<string, unknown>, version?: number) =>
     request<Project>('PATCH', `/api/v1/projects/${id}`, patch, version != null ? { 'If-Match': String(version) } : undefined),
   deleteProject: (id: string) => request<void>('DELETE', `/api/v1/projects/${id}`),
+
+  createClient: (input: CreateClientInput) => request<Client>('POST', '/api/v1/clients', input),
+  updateClient: (id: string, patch: Record<string, unknown>, version?: number) =>
+    request<Client>('PATCH', `/api/v1/clients/${id}`, patch, version != null ? { 'If-Match': String(version) } : undefined),
+  deleteClient: (id: string) => request<void>('DELETE', `/api/v1/clients/${id}`),
 };
 
 /** WebSocket URL for realtime. Identity rides the session cookie. */

@@ -55,4 +55,14 @@ type CreateProjectInput struct {
 	Subtitle *string `json:"subtitle"`
 	Due      *string `json:"due"`
 	Color    *string `json:"color"`
+	ClientID *string `json:"clientId"`
+}
+
+// CreateClientInput is the payload for POST /clients.
+type CreateClientInput struct {
+	Name              string  `json:"name"`
+	Tier              *string `json:"tier"`
+	Kind              *string `json:"kind"`
+	Color             *string `json:"color"`
+	ExpectedTouchDays *int    `json:"expectedTouchDays"`
 }

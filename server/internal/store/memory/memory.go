@@ -19,6 +19,7 @@ type Store struct {
 	mu       sync.RWMutex
 	tenants  map[string]domain.Tenant
 	users    map[string]domain.User
+	clients  map[string]*domain.Client
 	projects map[string]*domain.Project
 	tasks    map[string]*domain.Task
 	broker   *broker
@@ -40,6 +41,7 @@ func New() *Store {
 	return &Store{
 		tenants:     make(map[string]domain.Tenant),
 		users:       make(map[string]domain.User),
+		clients:     make(map[string]*domain.Client),
 		projects:    make(map[string]*domain.Project),
 		tasks:       make(map[string]*domain.Task),
 		broker:      newBroker(),
@@ -54,6 +56,12 @@ func New() *Store {
 
 func (s *Store) AddTenant(t domain.Tenant) { s.mu.Lock(); s.tenants[t.ID] = t; s.mu.Unlock() }
 func (s *Store) AddUser(u domain.User)     { s.mu.Lock(); s.users[u.ID] = u; s.mu.Unlock() }
+func (s *Store) AddClient(c domain.Client) {
+	s.mu.Lock()
+	cp := c
+	s.clients[c.ID] = &cp
+	s.mu.Unlock()
+}
 func (s *Store) AddProject(p domain.Project) {
 	s.mu.Lock()
 	cp := p
@@ -94,6 +102,14 @@ func (s *Store) Bootstrap(_ context.Context, tenantID, userID string) (*domain.B
 		}
 	}
 
+	var clients []domain.Client
+	for _, c := range s.clients {
+		if c.TenantID == tenantID {
+			clients = append(clients, *c)
+		}
+	}
+	sortClients(clients)
+
 	var projects []domain.Project
 	for _, p := range s.projects {
 		if p.TenantID == tenantID {
@@ -113,6 +129,7 @@ func (s *Store) Bootstrap(_ context.Context, tenantID, userID string) (*domain.B
 	return &domain.Bootstrap{
 		Tenant:   tenant,
 		User:     user,
+		Clients:  clients,
 		Projects: projects,
 		Tasks:    tasks,
 		ServerAt: time.Now().UTC(),
@@ -160,6 +177,19 @@ func (s *Store) ListProjects(_ context.Context, tenantID string) ([]domain.Proje
 		}
 	}
 	sortProjects(out)
+	return out, nil
+}
+
+func (s *Store) ListClients(_ context.Context, tenantID string) ([]domain.Client, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.Client
+	for _, c := range s.clients {
+		if c.TenantID == tenantID {
+			out = append(out, *c)
+		}
+	}
+	sortClients(out)
 	return out, nil
 }
 
@@ -292,7 +322,7 @@ func (s *Store) CreateProject(_ context.Context, tenantID, actorID string, in do
 	}
 	now := time.Now().UTC()
 	p := domain.Project{
-		ID: domain.NewID(), TenantID: tenantID, Name: name,
+		ID: domain.NewID(), TenantID: tenantID, ClientID: in.ClientID, Name: name,
 		Subtitle: deref(in.Subtitle), Due: in.Due, Color: orDefault(in.Color, "#C2743D"),
 		Members: []domain.ProjectMember{}, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -322,6 +352,13 @@ func (s *Store) UpdateProject(_ context.Context, tenantID, actorID, id string, p
 	updated := cloneProject(existing)
 	if name, ok := patch["name"].(string); ok && strings.TrimSpace(name) != "" {
 		updated.Name = strings.TrimSpace(name)
+	}
+	if v, ok := patch["clientId"]; ok {
+		if v == nil {
+			updated.ClientID = nil
+		} else if s2, ok := v.(string); ok {
+			updated.ClientID = &s2
+		}
 	}
 	if v, ok := patch["subtitle"]; ok {
 		updated.Subtitle, _ = v.(string)
@@ -369,6 +406,126 @@ func (s *Store) DeleteProject(_ context.Context, tenantID, actorID, id string) e
 	return nil
 }
 
+// ---- client writes ----
+
+func (s *Store) CreateClient(_ context.Context, tenantID, actorID string, in domain.CreateClientInput) (*domain.Client, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, domain.Invalid("name", "is required")
+	}
+	tier := orDefault(in.Tier, domain.TierB)
+	if !domain.ValidTier(tier) {
+		return nil, domain.Invalid("tier", "is invalid")
+	}
+	kind := orDefault(in.Kind, domain.ClientExternal)
+	if !domain.ValidClientKind(kind) {
+		return nil, domain.Invalid("kind", "is invalid")
+	}
+	if in.ExpectedTouchDays != nil && *in.ExpectedTouchDays <= 0 {
+		return nil, domain.Invalid("expectedTouchDays", "must be positive")
+	}
+	now := time.Now().UTC()
+	c := domain.Client{
+		ID: domain.NewID(), TenantID: tenantID, Name: name, Tier: tier, Kind: kind,
+		Color: orDefault(in.Color, "#6E7E91"), ExpectedTouchDays: in.ExpectedTouchDays,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+
+	s.mu.Lock()
+	cp := c
+	s.clients[c.ID] = &cp
+	s.mu.Unlock()
+
+	s.broker.publish(clientEvent(domain.EventClientCreated, actorID, &c))
+	return &c, nil
+}
+
+func (s *Store) UpdateClient(_ context.Context, tenantID, actorID, id string, patch map[string]any, expectedVersion *int) (*domain.Client, error) {
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	existing, ok := s.clients[id]
+	if !ok || existing.TenantID != tenantID {
+		s.mu.Unlock()
+		return nil, domain.ErrNotFound
+	}
+	if expectedVersion != nil && *expectedVersion != existing.Version {
+		s.mu.Unlock()
+		return nil, domain.ErrConflict
+	}
+	updated := *existing
+	if name, ok := patch["name"].(string); ok && strings.TrimSpace(name) != "" {
+		updated.Name = strings.TrimSpace(name)
+	}
+	if t, ok := patch["tier"].(string); ok {
+		if !domain.ValidTier(t) {
+			s.mu.Unlock()
+			return nil, domain.Invalid("tier", "is invalid")
+		}
+		updated.Tier = t
+	}
+	if k, ok := patch["kind"].(string); ok {
+		if !domain.ValidClientKind(k) {
+			s.mu.Unlock()
+			return nil, domain.Invalid("kind", "is invalid")
+		}
+		updated.Kind = k
+	}
+	if c, ok := patch["color"].(string); ok {
+		updated.Color = c
+	}
+	if v, ok := patch["expectedTouchDays"]; ok {
+		n, err := touchDays(v)
+		if err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
+		updated.ExpectedTouchDays = n
+	}
+	if v, ok := patch["archived"]; ok {
+		if b, _ := v.(bool); b {
+			updated.ArchivedAt = &now
+		} else {
+			updated.ArchivedAt = nil
+		}
+	}
+	updated.Version = existing.Version + 1
+	updated.UpdatedAt = now
+	cp := updated
+	s.clients[id] = &cp
+	s.mu.Unlock()
+
+	s.broker.publish(clientEvent(domain.EventClientUpdated, actorID, &updated))
+	return &updated, nil
+}
+
+func (s *Store) DeleteClient(_ context.Context, tenantID, actorID, id string) error {
+	s.mu.Lock()
+	existing, ok := s.clients[id]
+	if !ok || existing.TenantID != tenantID {
+		s.mu.Unlock()
+		return domain.ErrNotFound
+	}
+	delete(s.clients, id)
+	// detach projects from the deleted client (tasks are unaffected). Bump
+	// updated_at to mirror the postgres ON DELETE SET NULL trigger; version is
+	// left as-is and no project.updated event fires (parity with postgres).
+	now := time.Now().UTC()
+	for _, p := range s.projects {
+		if p.ClientID != nil && *p.ClientID == id {
+			p.ClientID = nil
+			p.UpdatedAt = now
+		}
+	}
+	s.mu.Unlock()
+
+	s.broker.publish(domain.Event{
+		ID: domain.NewID(), Type: domain.EventClientDeleted, TenantID: tenantID,
+		ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+	})
+	return nil
+}
+
 // ---- realtime / lifecycle ----
 
 func (s *Store) Subscribe(tenantID string) (<-chan domain.Event, func()) {
@@ -400,6 +557,14 @@ func projectEvent(t domain.EventType, actorID string, p *domain.Project) domain.
 	}
 }
 
+func clientEvent(t domain.EventType, actorID string, c *domain.Client) domain.Event {
+	cp := *c
+	return domain.Event{
+		ID: domain.NewID(), Type: t, TenantID: c.TenantID, ActorID: actorID,
+		Client: &cp, EntityID: c.ID, At: time.Now().UTC(),
+	}
+}
+
 func cloneProject(p *domain.Project) domain.Project {
 	cp := *p
 	// start from a non-nil slice so an empty members list stays [] (not null) in JSON
@@ -418,6 +583,27 @@ func sortTasks(ts []domain.Task) {
 
 func sortProjects(ps []domain.Project) {
 	sort.Slice(ps, func(i, j int) bool { return ps[i].CreatedAt.Before(ps[j].CreatedAt) })
+}
+
+func sortClients(cs []domain.Client) {
+	sort.Slice(cs, func(i, j int) bool { return cs[i].CreatedAt.Before(cs[j].CreatedAt) })
+}
+
+// touchDays coerces a JSON patch value into a validated *int for
+// expected_touch_days: nil clears it, a positive number sets it.
+func touchDays(v any) (*int, error) {
+	if v == nil {
+		return nil, nil
+	}
+	f, ok := v.(float64) // JSON numbers decode to float64
+	if !ok {
+		return nil, domain.Invalid("expectedTouchDays", "must be a number")
+	}
+	n := int(f)
+	if n <= 0 {
+		return nil, domain.Invalid("expectedTouchDays", "must be positive")
+	}
+	return &n, nil
 }
 
 func deref(s *string) string {

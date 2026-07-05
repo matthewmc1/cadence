@@ -84,6 +84,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/projects", s.auth(s.handleCreateProject))
 	mux.Handle("PATCH /api/v1/projects/{id}", s.auth(s.handleUpdateProject))
 	mux.Handle("DELETE /api/v1/projects/{id}", s.auth(s.handleDeleteProject))
+	mux.Handle("GET /api/v1/clients", s.auth(s.handleListClients))
+	mux.Handle("POST /api/v1/clients", s.auth(s.handleCreateClient))
+	mux.Handle("PATCH /api/v1/clients/{id}", s.auth(s.handleUpdateClient))
+	mux.Handle("DELETE /api/v1/clients/{id}", s.auth(s.handleDeleteClient))
 	mux.Handle("GET /api/v1/realtime", s.auth(s.handleRealtime))
 
 	// middleware chain (outermost first)

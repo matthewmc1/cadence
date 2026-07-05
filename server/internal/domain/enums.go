@@ -38,6 +38,35 @@ func (s Status) Valid() bool {
 	return false
 }
 
+// ClientTier ranks how much of your attention a client warrants (A > B > C).
+const (
+	TierA = "a"
+	TierB = "b"
+	TierC = "c"
+)
+
+func ValidTier(t string) bool {
+	switch t {
+	case TierA, TierB, TierC:
+		return true
+	}
+	return false
+}
+
+// ClientKind separates external clients from internal initiatives.
+const (
+	ClientExternal = "client"
+	ClientInternal = "internal"
+)
+
+func ValidClientKind(k string) bool {
+	switch k {
+	case ClientExternal, ClientInternal:
+		return true
+	}
+	return false
+}
+
 // EventType labels a realtime change broadcast to a tenant's subscribers.
 type EventType string
 
@@ -48,4 +77,7 @@ const (
 	EventProjectCreated EventType = "project.created"
 	EventProjectUpdated EventType = "project.updated"
 	EventProjectDeleted EventType = "project.deleted"
+	EventClientCreated  EventType = "client.created"
+	EventClientUpdated  EventType = "client.updated"
+	EventClientDeleted  EventType = "client.deleted"
 )

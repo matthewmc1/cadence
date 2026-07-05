@@ -14,6 +14,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// serialize empty collections as [] rather than null
+	if boot.Clients == nil {
+		boot.Clients = []domain.Client{}
+	}
 	if boot.Projects == nil {
 		boot.Projects = []domain.Project{}
 	}

@@ -64,10 +64,29 @@ func ValidRecurrence(r string) bool {
 	return false
 }
 
+// Client is the strategic spine: who a body of work is ultimately for. Projects
+// belong to a client; tasks inherit their client through their project.
+type Client struct {
+	ID       string `json:"id"`
+	TenantID string `json:"tenantId"`
+	Name     string `json:"name"`
+	Tier     string `json:"tier"` // a|b|c — how much attention it warrants
+	Kind     string `json:"kind"` // client|internal
+	Color    string `json:"color"`
+	// ExpectedTouchDays is the cadence target: flag the client "underserved"
+	// when it goes untouched longer than this. nil = no expectation set.
+	ExpectedTouchDays *int       `json:"expectedTouchDays"`
+	ArchivedAt        *time.Time `json:"archivedAt"`
+	Version           int        `json:"version"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
+}
+
 // Project groups tasks toward an outcome with a due date.
 type Project struct {
 	ID        string          `json:"id"`
 	TenantID  string          `json:"tenantId"`
+	ClientID  *string         `json:"clientId"` // the client this project serves (nil = unassigned)
 	Name      string          `json:"name"`
 	Subtitle  string          `json:"subtitle"`
 	Due       *string         `json:"due"`
@@ -131,7 +150,8 @@ type Event struct {
 	ActorID  string    `json:"actorId"` // who made the change — lets a client skip its own echo
 	Task     *Task     `json:"task,omitempty"`
 	Project  *Project  `json:"project,omitempty"`
-	// EntityID is always set (covers deletes, where Task/Project is nil).
+	Client   *Client   `json:"client,omitempty"`
+	// EntityID is always set (covers deletes, where Task/Project/Client is nil).
 	EntityID string    `json:"entityId"`
 	At       time.Time `json:"at"`
 }
@@ -140,6 +160,7 @@ type Event struct {
 type Bootstrap struct {
 	Tenant   Tenant    `json:"tenant"`
 	User     User      `json:"user"`
+	Clients  []Client  `json:"clients"`
 	Projects []Project `json:"projects"`
 	Tasks    []Task    `json:"tasks"`
 	ServerAt time.Time `json:"serverAt"`

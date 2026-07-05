@@ -6,8 +6,10 @@ import { Eyebrow } from '../components/primitives';
 import { Heatmap } from '../components/Heatmap';
 import type { DoneItem } from '../state/selectors';
 
+const TIER_LABEL: Record<string, string> = { a: 'A', b: 'B', c: 'C' };
+
 export function InsightsView() {
-  const { insights, signals, recentDone } = useApp();
+  const { insights, signals, recentDone, clientHealth } = useApp();
   const { openEditor, setReflection } = useActions();
   const { peak, dip, locations, heroDay, adminDay, bestWhen, topPlace } = insights;
 
@@ -38,6 +40,38 @@ export function InsightsView() {
           </div>
         </section>
       )}
+      {clientHealth.length > 0 && (
+        <section className="clients" aria-label="Clients">
+          <div className="clients__head">
+            <span className="clients__title">Clients</span>
+            <span className="clients__sub">who the work is for — and who’s going quiet</span>
+          </div>
+          <div className="clients__grid">
+            {clientHealth.map((c) => (
+              <div key={c.id} className={'chealth' + (c.underserved ? ' chealth--underserved' : '')}>
+                <div className="chealth__top">
+                  <span className="chealth__tier" style={{ background: c.color }}>{TIER_LABEL[c.tier] ?? c.tier}</span>
+                  <span className="chealth__name">{c.name}</span>
+                  {c.kind === 'internal' && <span className="chealth__kind">internal</span>}
+                </div>
+                <div className="chealth__meta">
+                  {c.projectCount} project{c.projectCount === 1 ? '' : 's'} · {c.openCount} open · {c.doneCount} shipped
+                </div>
+                <div className={'chealth__touch' + (c.underserved ? ' is-warn' : '')}>
+                  {c.underserved && <span className="chealth__flag">Underserved</span>}
+                  {c.daysSince == null
+                    ? 'No completed work yet'
+                    : c.daysSince === 0
+                      ? 'Touched today'
+                      : `Last touched ${c.daysSince} day${c.daysSince === 1 ? '' : 's'} ago`}
+                  {c.expectedTouchDays != null && ` · aim every ${c.expectedTouchDays}d`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {insights.total === 0 ? (
         <h1 className="insights__title serif">Your patterns will appear as you finish work.</h1>
       ) : (

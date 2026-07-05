@@ -35,6 +35,11 @@ type Store interface {
 	UpdateProject(ctx context.Context, tenantID, actorID, id string, patch map[string]any, expectedVersion *int) (*domain.Project, error)
 	DeleteProject(ctx context.Context, tenantID, actorID, id string) error
 
+	ListClients(ctx context.Context, tenantID string) ([]domain.Client, error)
+	CreateClient(ctx context.Context, tenantID, actorID string, in domain.CreateClientInput) (*domain.Client, error)
+	UpdateClient(ctx context.Context, tenantID, actorID, id string, patch map[string]any, expectedVersion *int) (*domain.Client, error)
+	DeleteClient(ctx context.Context, tenantID, actorID, id string) error
+
 	// Subscribe returns a channel of events for one tenant and an unsubscribe
 	// func. The channel is closed when unsubscribe is called.
 	Subscribe(tenantID string) (<-chan domain.Event, func())

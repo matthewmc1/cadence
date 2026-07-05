@@ -7,11 +7,11 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import type { Task as NTask, Project as NProject, ServerEvent, TaskPatch, CreateTaskInput, User } from '../api/types';
+import type { Task as NTask, Project as NProject, Client as NClient, ServerEvent, TaskPatch, CreateTaskInput, CreateClientInput, ClientTier, User } from '../api/types';
 import { api, realtimeURL, ApiError } from '../api/client';
 import { connectRealtime, type ConnState } from '../api/realtime';
 import { inferTask, bestSlot, type Kind, type EnergyProfile } from '../lib/energy';
-import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, computeSignals, selectRecentDone, deriveEnergyProfile, priorityScore, clock, type Insights, type Signal, type DoneItem } from './selectors';
+import { selectToday, selectWeek, selectMonth, selectBacklog, selectProject, computeInsights, computeSignals, selectRecentDone, selectClientHealth, deriveEnergyProfile, priorityScore, clock, type Insights, type Signal, type DoneItem, type ClientHealth } from './selectors';
 import { computeNow, computeWeek, startOfWeek, addDays, ymd, combine, sameDay, occurrences } from '../lib/time';
 import type { SchedTask, WeekCtx, Assignment } from '../ai/scheduler';
 import type { View, Now, TodayItem, WeekDay, MonthGrid, BacklogTask, Project } from './types';
@@ -32,6 +32,7 @@ interface RawState {
   error: string | null;
   tasks: NTask[];
   projects: NProject[];
+  clients: NClient[];
   tenantId: string;
   userId: string;
   userInitial: string;
@@ -60,6 +61,7 @@ const initialState: RawState = {
   error: null,
   tasks: [],
   projects: [],
+  clients: [],
   tenantId: '',
   userId: '',
   userInitial: 'A',
@@ -86,12 +88,14 @@ type Action =
   | { type: 'AUTH_ANON' }
   | { type: 'LINK_SENT'; email: string; devLink: string | null }
   | { type: 'BOOTSTRAP_START' }
-  | { type: 'BOOTSTRAP_OK'; tasks: NTask[]; projects: NProject[]; tenantId: string; userId: string; userInitial: string; userColor: string }
+  | { type: 'BOOTSTRAP_OK'; tasks: NTask[]; projects: NProject[]; clients: NClient[]; tenantId: string; userId: string; userInitial: string; userColor: string }
   | { type: 'BOOTSTRAP_ERR'; error: string }
   | { type: 'UPSERT_TASK'; task: NTask }
   | { type: 'REMOVE_TASK'; id: string }
   | { type: 'UPSERT_PROJECT'; project: NProject }
   | { type: 'REMOVE_PROJECT'; id: string }
+  | { type: 'UPSERT_CLIENT'; client: NClient }
+  | { type: 'REMOVE_CLIENT'; id: string }
   | { type: 'SET_VIEW'; view: View }
   | { type: 'SET_DRAFT'; draft: string }
   | { type: 'SELECT_BACKLOG'; id: string | null }
@@ -132,7 +136,7 @@ function reducer(state: RawState, action: Action): RawState {
       return { ...state, status: 'loading' };
     case 'BOOTSTRAP_OK':
       return {
-        ...state, status: 'ready', error: null, tasks: action.tasks, projects: action.projects,
+        ...state, status: 'ready', error: null, tasks: action.tasks, projects: action.projects, clients: action.clients,
         tenantId: action.tenantId, userId: action.userId, userInitial: action.userInitial, userColor: action.userColor,
       };
     case 'BOOTSTRAP_ERR':
@@ -145,6 +149,15 @@ function reducer(state: RawState, action: Action): RawState {
       return { ...state, projects: upsert(state.projects, action.project) };
     case 'REMOVE_PROJECT':
       return { ...state, projects: state.projects.filter((p) => p.id !== action.id) };
+    case 'UPSERT_CLIENT':
+      return { ...state, clients: upsert(state.clients, action.client) };
+    case 'REMOVE_CLIENT':
+      // a deleted client detaches its projects locally (server does the same)
+      return {
+        ...state,
+        clients: state.clients.filter((c) => c.id !== action.id),
+        projects: state.projects.map((p) => (p.clientId === action.id ? { ...p, clientId: null } : p)),
+      };
     case 'SET_VIEW':
       return { ...state, view: action.view };
     case 'SET_DRAFT':
@@ -201,6 +214,8 @@ export interface AppState {
   project: Project | null;
   projects: { id: string; name: string; color: string }[];
   selectedProjectId: string | null;
+  clients: { id: string; name: string; tier: ClientTier; kind: NClient['kind']; color: string; archivedAt: string | null }[];
+  clientHealth: ClientHealth[];
   people: { userId: string; initial: string; color: string }[];
   insights: Insights;
   signals: Signal[];
@@ -254,9 +269,11 @@ function derive(s: RawState): AppState {
     project: selectProject(s.tasks, activeProject),
     projects: s.projects.map((p) => ({ id: p.id, name: p.name, color: p.color })),
     selectedProjectId: activeProject?.id ?? null,
+    clients: s.clients.map((c) => ({ id: c.id, name: c.name, tier: c.tier, kind: c.kind, color: c.color, archivedAt: c.archivedAt })),
+    clientHealth: selectClientHealth(s.tasks, s.projects, s.clients, new Date()),
     people: [...peopleMap.values()],
     insights,
-    signals: computeSignals(s.tasks, s.projects, insights.profile, new Date()),
+    signals: computeSignals(s.tasks, s.projects, s.clients, insights.profile, new Date()),
     recentDone: selectRecentDone(s.tasks, s.projects),
     energyProfile: insights.profile,
     editorOpen: s.editorMode != null,
@@ -297,6 +314,8 @@ export interface Actions {
   createTaskFull: (input: CreateTaskInput) => Promise<void>;
   createProject: (name: string, subtitle?: string) => void;
   selectProject: (id: string) => void;
+  createClientForProject: (projectId: string, input: CreateClientInput) => void;
+  assignProjectClient: (projectId: string, clientId: string | null) => void;
   planPrev: () => void;
   planNext: () => void;
   planToday: () => void;
@@ -327,7 +346,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try {
       const boot = await api.bootstrap();
       dispatch({
-        type: 'BOOTSTRAP_OK', tasks: boot.tasks, projects: boot.projects,
+        type: 'BOOTSTRAP_OK', tasks: boot.tasks, projects: boot.projects, clients: boot.clients,
         tenantId: boot.tenant.id, userId: boot.user.id, userInitial: boot.user.initial, userColor: boot.user.color,
       });
     } catch (e) {
@@ -431,6 +450,12 @@ function applyEvent(dispatch: React.Dispatch<Action>, ref: React.MutableRefObjec
       return;
     }
     if (ev.project) dispatch({ type: 'UPSERT_PROJECT', project: ev.project });
+  } else if (ev.type.startsWith('client.')) {
+    if (ev.type === 'client.deleted') {
+      dispatch({ type: 'REMOVE_CLIENT', id: ev.entityId });
+      return;
+    }
+    if (ev.client) dispatch({ type: 'UPSERT_CLIENT', client: ev.client });
   }
 }
 
@@ -451,6 +476,22 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
       dispatch({ type: 'UPSERT_TASK', task: prev });
       toast(e instanceof ApiError ? e.message : 'Update failed');
     }
+  };
+
+  // optimistically re-point a project at a client (or null), rolling back on failure.
+  // No If-Match version (last-write-wins, like patchTask): a rapid re-pick would
+  // otherwise 409 against its own in-flight optimistic version bump.
+  const setProjectClient = (projectId: string, clientId: string | null) => {
+    const prev = ref.current.projects.find((p) => p.id === projectId);
+    if (!prev) return;
+    dispatch({ type: 'UPSERT_PROJECT', project: { ...prev, clientId, version: prev.version + 1 } });
+    api
+      .updateProject(projectId, { clientId })
+      .then((p) => dispatch({ type: 'UPSERT_PROJECT', project: p }))
+      .catch((e) => {
+        dispatch({ type: 'UPSERT_PROJECT', project: prev });
+        toast(e instanceof ApiError ? e.message : 'Could not update project');
+      });
   };
 
   // ISO datetime for a (weekday-index, hour) within the currently displayed week
@@ -708,6 +749,19 @@ function makeActions(dispatch: React.Dispatch<Action>, ref: React.MutableRefObje
     },
 
     selectProject: (id) => dispatch({ type: 'SELECT_PROJECT', id }),
+
+    createClientForProject: (projectId, input) => {
+      api
+        .createClient(input)
+        .then((c) => {
+          dispatch({ type: 'UPSERT_CLIENT', client: c });
+          setProjectClient(projectId, c.id);
+          toast(`Client added · ${c.name}`);
+        })
+        .catch((e) => toast(e instanceof ApiError ? e.message : 'Could not add client'));
+    },
+
+    assignProjectClient: (projectId, clientId) => setProjectClient(projectId, clientId),
 
     planPrev: () => {
       const d = new Date(ref.current.planAnchor);

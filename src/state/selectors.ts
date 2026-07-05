@@ -1,4 +1,4 @@
-import type { Task as NTask, Project as NProject } from '../api/types';
+import type { Task as NTask, Project as NProject, Client as NClient, ClientTier, ClientKind } from '../api/types';
 import type { TodayItem, WeekDay, MonthGrid, MonthDay, PlacedTask, BacklogTask, Project, BoardTask, BoardColumn } from './types';
 import { KINDS, WEEK_MODEL, DEFAULT_PROFILE, type Kind, type EnergyProfile } from '../lib/energy';
 import { occurrences, hourOf, sameDay, addDays, startOfWeek, startOfMonth, monthLabel, ymd } from '../lib/time';
@@ -216,6 +216,7 @@ export function selectProject(tasks: NTask[], project: NProject | undefined): Pr
 
   return {
     id: project.id,
+    clientId: project.clientId,
     name: project.name,
     subtitle: project.subtitle,
     due: project.due ?? '',
@@ -396,21 +397,27 @@ const SLIP_AGING_DAYS = 3;
 const STALL_DAYS = 10;
 const WEEKLY_DEEP_BUDGET_HRS = 15; // ~3h/day × 5 — the scarce deep-focus capacity
 
+// Whole calendar days between two instants, both floored to local midnight
+// (so "yesterday at 23:00 → today at 01:00" is 1 day, not 0). Shared by every
+// aging calculation so slip/stall/underserved all count days the same way.
+function startOfDayMs(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function calDaysSince(ms: number, nowMs: number): number {
+  return Math.round((startOfDayMs(nowMs) - startOfDayMs(ms)) / 86400000);
+}
+
 /**
  * Turn the current task set into a short list of actionable signals. Everything
  * here is derived from fields already present (important/urgent, projectId,
  * scheduledAt, doneAt, effortMinutes) — no new data required.
  */
-export function computeSignals(tasks: NTask[], projects: NProject[], profile: EnergyProfile, now: Date): Signal[] {
+export function computeSignals(tasks: NTask[], projects: NProject[], clients: NClient[], profile: EnergyProfile, now: Date): Signal[] {
   const out: Signal[] = [];
-  // whole calendar days elapsed (both floored to local midnight, like startOfWeek/Month)
-  const midnight = (ms: number) => {
-    const d = new Date(ms);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  };
-  const nowMid = midnight(now.getTime());
-  const dSince = (ms: number) => Math.round((nowMid - midnight(ms)) / 86400000);
+  const nowMs = now.getTime();
+  const dSince = (ms: number) => calDaysSince(ms, nowMs);
   const weekStart = startOfWeek(now);
   const weekEnd = addDays(weekStart, 7);
 
@@ -481,6 +488,22 @@ export function computeSignals(tasks: NTask[], projects: NProject[], profile: En
     });
   }
 
+  // 4) clients past their touch cadence — strategic neglect. Completions roll up
+  //    through projects to the client they serve; A-tier surfaces first.
+  const quiet = clients
+    .map((c) => ({ c, s: clientTouch(c, projects, tasks, nowMs) }))
+    .filter(({ s }) => s.underserved)
+    .sort((a, b) => tierRank(a.c.tier) - tierRank(b.c.tier));
+  for (const { c, s } of quiet.slice(0, 2)) {
+    const since = s.daysSince == null ? 'no completed work yet' : `${s.daysSince} days since last touch`;
+    out.push({
+      id: 'client:' + c.id,
+      kind: 'act',
+      title: `${c.name} is going quiet`,
+      detail: `Tier ${c.tier.toUpperCase()} · ${since} — aim to touch every ${c.expectedTouchDays} day${c.expectedTouchDays === 1 ? '' : 's'}.`,
+    });
+  }
+
   return out;
 }
 
@@ -513,5 +536,99 @@ export function selectRecentDone(tasks: NTask[], projects: NProject[] = [], limi
         reflection: t.reflection,
         project: p ? { name: p.name, color: p.color } : undefined,
       };
+    });
+}
+
+/* --------------------------------------------------------------- Clients */
+
+function tierRank(t: ClientTier): number {
+  return t === 'a' ? 0 : t === 'b' ? 1 : 2;
+}
+
+interface ClientTouch {
+  projectCount: number;
+  openCount: number;
+  doneCount: number;
+  lastTouchMs: number | null; // most recent completion across the client's work
+  daysSince: number | null;
+  underserved: boolean;
+}
+
+/**
+ * Roll a client's activity up through its projects: how much open/done work it
+ * has, when it was last touched (a completion), and whether that exceeds its
+ * expected touch cadence. Tasks inherit their client through their project, so
+ * a task counts for a client iff its project belongs to that client.
+ */
+function clientTouch(client: NClient, projects: NProject[], tasks: NTask[], nowMs: number): ClientTouch {
+  const projectIds = new Set(projects.filter((p) => p.clientId === client.id).map((p) => p.id));
+  let openCount = 0;
+  let doneCount = 0;
+  let lastTouchMs: number | null = null;
+  for (const t of tasks) {
+    if (!t.projectId || !projectIds.has(t.projectId)) continue;
+    if (t.status === 'done') {
+      doneCount++;
+      if (t.doneAt) {
+        const ms = new Date(t.doneAt).getTime();
+        if (lastTouchMs == null || ms > lastTouchMs) lastTouchMs = ms;
+      }
+    } else {
+      openCount++;
+    }
+  }
+  const daysSince = lastTouchMs == null ? null : calDaysSince(lastTouchMs, nowMs);
+  let underserved = false;
+  if (!client.archivedAt && client.expectedTouchDays != null && projectIds.size > 0) {
+    // never touched → measure neglect from when the client was created
+    underserved = lastTouchMs == null
+      ? calDaysSince(new Date(client.createdAt).getTime(), nowMs) > client.expectedTouchDays
+      : daysSince! > client.expectedTouchDays;
+  }
+  return { projectCount: projectIds.size, openCount, doneCount, lastTouchMs, daysSince, underserved };
+}
+
+/** A client with its rolled-up health — the "who is this for / who's underserved" surface. */
+export interface ClientHealth {
+  id: string;
+  name: string;
+  tier: ClientTier;
+  kind: ClientKind;
+  color: string;
+  expectedTouchDays: number | null;
+  projectCount: number;
+  openCount: number;
+  doneCount: number;
+  lastTouch: string | null; // ISO of most recent completion
+  daysSince: number | null;
+  underserved: boolean;
+}
+
+/** Active clients ranked by what needs attention: underserved first, then tier. */
+export function selectClientHealth(tasks: NTask[], projects: NProject[], clients: NClient[], now: Date): ClientHealth[] {
+  const nowMs = now.getTime();
+  return clients
+    .filter((c) => !c.archivedAt)
+    .map((c) => {
+      const s = clientTouch(c, projects, tasks, nowMs);
+      return {
+        id: c.id,
+        name: c.name,
+        tier: c.tier,
+        kind: c.kind,
+        color: c.color,
+        expectedTouchDays: c.expectedTouchDays,
+        projectCount: s.projectCount,
+        openCount: s.openCount,
+        doneCount: s.doneCount,
+        lastTouch: s.lastTouchMs == null ? null : new Date(s.lastTouchMs).toISOString(),
+        daysSince: s.daysSince,
+        underserved: s.underserved,
+      };
+    })
+    .sort((a, b) => {
+      if (a.underserved !== b.underserved) return a.underserved ? -1 : 1;
+      if (a.tier !== b.tier) return tierRank(a.tier) - tierRank(b.tier);
+      return a.name.localeCompare(b.name);
     });
 }

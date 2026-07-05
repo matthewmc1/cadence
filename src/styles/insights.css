@@ -320,3 +320,105 @@
   border-bottom-color: var(--accent);
   text-align: left;
 }
+
+/* ---------------------------------------------------------------- Clients */
+.clients {
+  margin-top: 26px;
+}
+.clients__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.clients__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+.clients__sub {
+  font-size: 12px;
+  color: var(--ink-5);
+}
+.clients__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.chealth {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px 15px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--r-md, 10px);
+}
+.chealth--underserved {
+  border-left-color: var(--accent);
+  background: var(--fill-warm);
+}
+.chealth__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chealth__tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.chealth__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chealth__kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  background: var(--fill);
+  border-radius: var(--r-pill, 999px);
+  padding: 2px 7px;
+  flex-shrink: 0;
+}
+.chealth__meta {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.chealth__touch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.chealth__touch.is-warn {
+  color: var(--accent-deep);
+  font-weight: 500;
+}
+.chealth__flag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--accent);
+  border-radius: var(--r-pill, 999px);
+  padding: 2px 7px;
+}

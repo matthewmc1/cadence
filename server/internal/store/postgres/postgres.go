@@ -164,6 +164,12 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 		}
 		boot.User = domain.DeriveUser(userID, tenantID, email)
 
+		clients, err := selectClients(ctx, tx)
+		if err != nil {
+			return err
+		}
+		boot.Clients = clients
+
 		projects, err := selectProjects(ctx, tx)
 		if err != nil {
 			return err
@@ -180,6 +186,9 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 	})
 	if err != nil {
 		return nil, err
+	}
+	if boot.Clients == nil {
+		boot.Clients = []domain.Client{}
 	}
 	if boot.Projects == nil {
 		boot.Projects = []domain.Project{}
@@ -284,7 +293,7 @@ func getTaskTx(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (*doma
 
 func selectProjects(ctx context.Context, tx pgx.Tx) ([]domain.Project, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, tenant_id::text, name, subtitle, due, color, version, created_at, updated_at
+		SELECT id::text, tenant_id::text, client_id::text, name, subtitle, due, color, version, created_at, updated_at
 		FROM projects ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -295,7 +304,7 @@ func selectProjects(ctx context.Context, tx pgx.Tx) ([]domain.Project, error) {
 	index := map[string]int{}
 	for rows.Next() {
 		var p domain.Project
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.Members = []domain.ProjectMember{}
@@ -490,15 +499,15 @@ func (s *Store) CreateProject(ctx context.Context, tenantID, actorID string, in 
 	}
 	now := time.Now().UTC()
 	p := domain.Project{
-		ID: domain.NewID(), TenantID: tenantID, Name: name, Subtitle: deref(in.Subtitle),
+		ID: domain.NewID(), TenantID: tenantID, ClientID: in.ClientID, Name: name, Subtitle: deref(in.Subtitle),
 		Due: in.Due, Color: orDefault(in.Color, "#C2743D"), Members: []domain.ProjectMember{},
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO projects (tenant_id, id, name, subtitle, due, color, version, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-			p.TenantID, p.ID, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.CreatedAt, p.UpdatedAt); err != nil {
+			INSERT INTO projects (tenant_id, id, client_id, name, subtitle, due, color, version, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			p.TenantID, p.ID, p.ClientID, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.CreatedAt, p.UpdatedAt); err != nil {
 			return err
 		}
 		return emit(ctx, tx, projectEvent(domain.EventProjectCreated, actorID, &p))
@@ -514,9 +523,9 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var p domain.Project
 		err := tx.QueryRow(ctx, `
-			SELECT id::text, tenant_id::text, name, subtitle, due, color, version, created_at, updated_at
+			SELECT id::text, tenant_id::text, client_id::text, name, subtitle, due, color, version, created_at, updated_at
 			FROM projects WHERE id = $1 FOR UPDATE`, id).
-			Scan(&p.ID, &p.TenantID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt)
+			Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -528,6 +537,13 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 		}
 		if name, ok := patch["name"].(string); ok && trim(name) != "" {
 			p.Name = trim(name)
+		}
+		if v, ok := patch["clientId"]; ok {
+			if v == nil {
+				p.ClientID = nil
+			} else if s2, ok := v.(string); ok {
+				p.ClientID = &s2
+			}
 		}
 		if v, ok := patch["subtitle"]; ok {
 			p.Subtitle, _ = v.(string)
@@ -544,8 +560,8 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 		}
 		p.Version++
 		if _, err := tx.Exec(ctx,
-			`UPDATE projects SET name=$2, subtitle=$3, due=$4, color=$5, version=$6 WHERE id=$1`,
-			id, p.Name, p.Subtitle, p.Due, p.Color, p.Version); err != nil {
+			`UPDATE projects SET name=$2, subtitle=$3, due=$4, color=$5, version=$6, client_id=$7 WHERE id=$1`,
+			id, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.ClientID); err != nil {
 			return err
 		}
 		members, err := projectMembers(ctx, tx, id)
@@ -595,6 +611,180 @@ func projectMembers(ctx context.Context, tx pgx.Tx, projectID string) ([]domain.
 	return out, rows.Err()
 }
 
+// ---- client reads / writes -------------------------------------------------
+
+func selectClients(ctx context.Context, tx pgx.Tx) ([]domain.Client, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, tenant_id::text, name, tier, kind, color, expected_touch_days, archived_at, version, created_at, updated_at
+		FROM clients ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Client
+	for rows.Next() {
+		var c domain.Client
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color,
+			&c.ExpectedTouchDays, &c.ArchivedAt, &c.Version, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListClients(ctx context.Context, tenantID string) ([]domain.Client, error) {
+	var out []domain.Client
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		clients, err := selectClients(ctx, tx)
+		if err != nil {
+			return err
+		}
+		out = clients
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) CreateClient(ctx context.Context, tenantID, actorID string, in domain.CreateClientInput) (*domain.Client, error) {
+	name := trim(in.Name)
+	if name == "" {
+		return nil, domain.Invalid("name", "is required")
+	}
+	tier := orDefault(in.Tier, domain.TierB)
+	if !domain.ValidTier(tier) {
+		return nil, domain.Invalid("tier", "is invalid")
+	}
+	kind := orDefault(in.Kind, domain.ClientExternal)
+	if !domain.ValidClientKind(kind) {
+		return nil, domain.Invalid("kind", "is invalid")
+	}
+	if in.ExpectedTouchDays != nil && *in.ExpectedTouchDays <= 0 {
+		return nil, domain.Invalid("expectedTouchDays", "must be positive")
+	}
+	now := time.Now().UTC()
+	c := domain.Client{
+		ID: domain.NewID(), TenantID: tenantID, Name: name, Tier: tier, Kind: kind,
+		Color: orDefault(in.Color, "#6E7E91"), ExpectedTouchDays: in.ExpectedTouchDays,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO clients (tenant_id, id, name, tier, kind, color, expected_touch_days, version, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			c.TenantID, c.ID, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.Version, c.CreatedAt, c.UpdatedAt); err != nil {
+			return err
+		}
+		return emit(ctx, tx, clientEvent(domain.EventClientCreated, actorID, &c))
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, patch map[string]any, expectedVersion *int) (*domain.Client, error) {
+	var updated *domain.Client
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var c domain.Client
+		err := tx.QueryRow(ctx, `
+			SELECT id::text, tenant_id::text, name, tier, kind, color, expected_touch_days, archived_at, version, created_at, updated_at
+			FROM clients WHERE id = $1 FOR UPDATE`, id).
+			Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color,
+				&c.ExpectedTouchDays, &c.ArchivedAt, &c.Version, &c.CreatedAt, &c.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if expectedVersion != nil && *expectedVersion != c.Version {
+			return domain.ErrConflict
+		}
+		if name, ok := patch["name"].(string); ok && trim(name) != "" {
+			c.Name = trim(name)
+		}
+		if t, ok := patch["tier"].(string); ok {
+			if !domain.ValidTier(t) {
+				return domain.Invalid("tier", "is invalid")
+			}
+			c.Tier = t
+		}
+		if k, ok := patch["kind"].(string); ok {
+			if !domain.ValidClientKind(k) {
+				return domain.Invalid("kind", "is invalid")
+			}
+			c.Kind = k
+		}
+		if col, ok := patch["color"].(string); ok {
+			c.Color = col
+		}
+		if v, ok := patch["expectedTouchDays"]; ok {
+			n, err := touchDaysPG(v)
+			if err != nil {
+				return err
+			}
+			c.ExpectedTouchDays = n
+		}
+		if v, ok := patch["archived"]; ok {
+			if b, _ := v.(bool); b {
+				at := time.Now().UTC()
+				c.ArchivedAt = &at
+			} else {
+				c.ArchivedAt = nil
+			}
+		}
+		c.Version++
+		// RETURNING updated_at so the response/event carry the trigger-bumped
+		// timestamp (matches the memory adapter, which sets UpdatedAt to now).
+		if err := tx.QueryRow(ctx,
+			`UPDATE clients SET name=$2, tier=$3, kind=$4, color=$5, expected_touch_days=$6, archived_at=$7, version=$8 WHERE id=$1 RETURNING updated_at`,
+			id, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.ArchivedAt, c.Version).Scan(&c.UpdatedAt); err != nil {
+			return err
+		}
+		updated = &c
+		return emit(ctx, tx, clientEvent(domain.EventClientUpdated, actorID, &c))
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (s *Store) DeleteClient(ctx context.Context, tenantID, actorID, id string) error {
+	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		// projects.client_id is ON DELETE SET NULL, so projects are detached automatically.
+		ct, err := tx.Exec(ctx, `DELETE FROM clients WHERE id = $1`, id)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return domain.ErrNotFound
+		}
+		return emit(ctx, tx, domain.Event{
+			ID: domain.NewID(), Type: domain.EventClientDeleted, TenantID: tenantID,
+			ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+		})
+	})
+}
+
+// touchDaysPG coerces a JSON patch value into a validated *int for
+// expected_touch_days: nil clears it, a positive number sets it.
+func touchDaysPG(v any) (*int, error) {
+	if v == nil {
+		return nil, nil
+	}
+	f, ok := v.(float64) // JSON numbers decode to float64
+	if !ok {
+		return nil, domain.Invalid("expectedTouchDays", "must be a number")
+	}
+	n := int(f)
+	if n <= 0 {
+		return nil, domain.Invalid("expectedTouchDays", "must be positive")
+	}
+	return &n, nil
+}
+
 // ---- outbox / events -------------------------------------------------------
 
 // emit writes the event to the outbox in the current transaction. The AFTER
@@ -618,6 +808,11 @@ func emit(ctx context.Context, tx pgx.Tx, ev domain.Event) error {
 func taskEvent(t domain.EventType, actorID string, task *domain.Task) domain.Event {
 	cp := *task
 	return domain.Event{ID: domain.NewID(), Type: t, TenantID: task.TenantID, ActorID: actorID, Task: &cp, EntityID: task.ID, At: time.Now().UTC()}
+}
+
+func clientEvent(t domain.EventType, actorID string, c *domain.Client) domain.Event {
+	cp := *c
+	return domain.Event{ID: domain.NewID(), Type: t, TenantID: c.TenantID, ActorID: actorID, Client: &cp, EntityID: c.ID, At: time.Now().UTC()}
 }
 
 func projectEvent(t domain.EventType, actorID string, p *domain.Project) domain.Event {

@@ -52,9 +52,28 @@ export interface Assignee {
 }
 export type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly';
 
+/** A client (or internal initiative) — the strategic spine above projects. */
+export type ClientTier = 'a' | 'b' | 'c';
+export type ClientKind = 'client' | 'internal';
+
+export interface Client {
+  id: string;
+  tenantId: string;
+  name: string;
+  tier: ClientTier;
+  kind: ClientKind;
+  color: string;
+  expectedTouchDays: number | null; // cadence target; null = no expectation
+  archivedAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
   tenantId: string;
+  clientId: string | null; // the client this project serves
   name: string;
   subtitle: string;
   due: string | null;
@@ -83,6 +102,7 @@ export interface User {
 export interface Bootstrap {
   tenant: Tenant;
   user: User;
+  clients: Client[];
   projects: Project[];
   tasks: Task[];
   serverAt: string;
@@ -101,7 +121,10 @@ export type EventType =
   | 'task.deleted'
   | 'project.created'
   | 'project.updated'
-  | 'project.deleted';
+  | 'project.deleted'
+  | 'client.created'
+  | 'client.updated'
+  | 'client.deleted';
 
 export interface ServerEvent {
   id: string;
@@ -110,6 +133,7 @@ export interface ServerEvent {
   actorId: string;
   task?: Task;
   project?: Project;
+  client?: Client;
   entityId: string;
   at: string;
 }
@@ -134,6 +158,25 @@ export interface CreateTaskInput {
   subtasks?: Subtask[];
   assignees?: Assignee[];
 }
+
+/** Fields accepted when creating a client. */
+export interface CreateClientInput {
+  name: string;
+  tier?: ClientTier;
+  kind?: ClientKind;
+  color?: string;
+  expectedTouchDays?: number | null;
+}
+
+/** Partial client update; any subset of these keys. */
+export type ClientPatch = Partial<{
+  name: string;
+  tier: ClientTier;
+  kind: ClientKind;
+  color: string;
+  expectedTouchDays: number | null;
+  archived: boolean;
+}>;
 
 /** Partial task update; any subset of these keys (null clears nullable ones). */
 export type TaskPatch = Partial<{
