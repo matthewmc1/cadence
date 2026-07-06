@@ -260,6 +260,10 @@ func (s *Store) CreateTask(_ context.Context, tenantID, actorID string, in domai
 	t.Normalize()
 
 	s.mu.Lock()
+	if t.ProjectID != nil && !s.hasProject(tenantID, *t.ProjectID) {
+		s.mu.Unlock()
+		return nil, domain.Invalid("projectId", "not found in this workspace")
+	}
 	cp := t
 	s.tasks[t.ID] = &cp
 	s.mu.Unlock()
@@ -285,6 +289,10 @@ func (s *Store) UpdateTask(_ context.Context, tenantID, actorID, id string, patc
 	if err := store.ApplyTaskPatch(&updated, patch, now); err != nil {
 		s.mu.Unlock()
 		return nil, err
+	}
+	if updated.ProjectID != nil && !s.hasProject(tenantID, *updated.ProjectID) {
+		s.mu.Unlock()
+		return nil, domain.Invalid("projectId", "not found in this workspace")
 	}
 	updated.Version = existing.Version + 1
 	updated.UpdatedAt = now
@@ -328,6 +336,10 @@ func (s *Store) CreateProject(_ context.Context, tenantID, actorID string, in do
 	}
 
 	s.mu.Lock()
+	if p.ClientID != nil && !s.hasClient(tenantID, *p.ClientID) {
+		s.mu.Unlock()
+		return nil, domain.Invalid("clientId", "not found in this workspace")
+	}
 	cp := p
 	s.projects[p.ID] = &cp
 	s.mu.Unlock()
@@ -372,6 +384,10 @@ func (s *Store) UpdateProject(_ context.Context, tenantID, actorID, id string, p
 	}
 	if c, ok := patch["color"].(string); ok {
 		updated.Color = c
+	}
+	if updated.ClientID != nil && !s.hasClient(tenantID, *updated.ClientID) {
+		s.mu.Unlock()
+		return nil, domain.Invalid("clientId", "not found in this workspace")
 	}
 	updated.Version = existing.Version + 1
 	updated.UpdatedAt = now
@@ -570,6 +586,19 @@ func cloneProject(p *domain.Project) domain.Project {
 	// start from a non-nil slice so an empty members list stays [] (not null) in JSON
 	cp.Members = append([]domain.ProjectMember{}, p.Members...)
 	return cp
+}
+
+// hasProject / hasClient report whether a referenced row exists in the tenant.
+// They read the maps without locking — the caller must already hold s.mu. Used
+// to reject cross-tenant references (a task pointing at another tenant's project,
+// or a project at another tenant's client), matching the Postgres composite FKs.
+func (s *Store) hasProject(tenantID, id string) bool {
+	p, ok := s.projects[id]
+	return ok && p.TenantID == tenantID
+}
+func (s *Store) hasClient(tenantID, id string) bool {
+	c, ok := s.clients[id]
+	return ok && c.TenantID == tenantID
 }
 
 func sortTasks(ts []domain.Task) {

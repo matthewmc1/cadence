@@ -1,0 +1,29 @@
+# Local Postgres for Cadence.
+#
+# Data lives in the named volume `cadence_pgdata`, so it PERSISTS across
+# `docker compose down` and machine restarts — it is only deleted by an explicit
+# `docker compose down -v` (see `make db-reset`). This is what makes local data
+# durable instead of living in the wiped-on-restart in-memory store.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cadence-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cadence
+      POSTGRES_PASSWORD: cadence
+      POSTGRES_DB: cadence
+    ports:
+      # Host port defaults to 55432 to avoid colliding with a local Postgres on 5432.
+      - "${CADENCE_DB_PORT:-55432}:5432"
+    volumes:
+      - cadence_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cadence -d cadence"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  cadence_pgdata:

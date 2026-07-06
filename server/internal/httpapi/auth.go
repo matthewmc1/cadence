@@ -25,6 +25,15 @@ func hashToken(tok string) string {
 
 // POST /auth/request {email} — issue a magic link.
 func (s *Server) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+
+	// This endpoint is public and sends real email, so it is an email-bombing /
+	// cost-amplification target. Cap requests per source IP first, before any work.
+	if !s.authRate.allowIP(clientIP(r), now) {
+		writeJSON(w, http.StatusTooManyRequests, errBody{errPayload{Message: "too many sign-in requests — wait a minute and try again", Code: "rate_limited"}})
+		return
+	}
+
 	var in struct {
 		Email string `json:"email"`
 	}
@@ -38,21 +47,41 @@ func (s *Server) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	okResp := map[string]any{"ok": true, "email": email}
+
+	// Per-email cooldown: don't flood one address with links. Report the same
+	// success (no enumeration signal); a real user rarely re-requests within a
+	// minute, and can retry after the cooldown.
+	if s.authRate.emailInCooldown(email, now) {
+		writeJSON(w, http.StatusOK, okResp)
+		return
+	}
+
 	tok := newToken()
-	if err := s.store.CreateLoginToken(r.Context(), hashToken(tok), email, time.Now().Add(s.loginTokenTTL)); err != nil {
+	if err := s.store.CreateLoginToken(r.Context(), hashToken(tok), email, now.Add(s.loginTokenTTL)); err != nil {
 		writeError(w, s.log, err)
 		return
 	}
 	link := s.linkBase(r) + "/auth?token=" + tok
 
-	// No email transport is wired; log the link. In dev we also return it so the
-	// flow is usable. In production, deliver `link` by email and never return it.
-	s.log.Info("magic link issued", "email", email, "link", link)
-	resp := map[string]any{"ok": true, "email": email}
-	if s.devAuth {
-		resp["devLink"] = link
+	// Deliver the link by email. A live-provider failure is surfaced to the user
+	// so they aren't left waiting for a mail that will never arrive (there is no
+	// account-enumeration concern: an account is created on verify, not request,
+	// so every well-formed email is treated identically).
+	if err := s.mailer.SendMagicLink(r.Context(), email, link); err != nil {
+		s.log.Error("magic link send failed", "email", email, "err", err)
+		writeJSON(w, http.StatusBadGateway, errBody{errPayload{Message: "couldn't send your sign-in email — please try again", Code: "mail_failed"}})
+		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	s.authRate.recordEmailSent(email, now) // start the cooldown only on a real send
+	s.log.Info("magic link issued", "email", email, "delivered", s.mailer.Live())
+
+	// In dev we also hand back the link for convenience. Never do this once a
+	// real mail provider is delivering it — the link is a bearer credential.
+	if s.devAuth && !s.mailer.Live() {
+		okResp["devLink"] = link
+	}
+	writeJSON(w, http.StatusOK, okResp)
 }
 
 // POST /auth/verify {token} — consume the link, start a session, set the cookie.

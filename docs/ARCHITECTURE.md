@@ -48,7 +48,8 @@ regardless of backend. You develop against memory and deploy on Postgres.
 A mutation (`POST /tasks`, `PATCH /tasks/{id}`, …) is handled in one
 RLS-scoped transaction:
 
-1. Resolve identity (`X-Tenant-ID` / `X-User-ID`, or a verified JWT in prod) →
+1. Resolve identity from the **session cookie** (magic-link sign-in) or a
+   `Bearer cdnc_…` personal access token — never a client-supplied header — into
    `tenantId`, `actorId` in the request context.
 2. `BEGIN` and `SELECT set_config('app.tenant_id', $tenant, true)` — every
    subsequent statement is now fenced by Row-Level Security to that tenant.
@@ -113,17 +114,34 @@ Shared schema, `tenant_id` on every row, enforced by PostgreSQL **Row-Level
 Security** — the densest, most operable model and the one with the cheapest
 zero-downtime migrations (one schema to migrate, not N).
 
-Defense in depth:
+Defense in depth — **two independent layers**, either of which alone fences a
+tenant off:
 
-- `ENABLE` **and** `FORCE ROW LEVEL SECURITY` — the policy applies even to the
-  table owner.
-- The app connects as a **non-superuser, `NOBYPASSRLS`** role. Superusers bypass
-  RLS, so production must not connect as one.
-- Isolation **fails closed**: the policy is `tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid`,
-  so an unset/empty setting selects zero rows instead of erroring or leaking.
+- **Explicit `tenant_id` predicates in the query layer.** Every tenant-scoped
+  read and write carries an explicit `WHERE tenant_id = $1` (and every
+  `UPDATE`/`DELETE` an `AND tenant_id = …`), and cross-tenant references are
+  rejected outright — a project can't point at another tenant's client, a task
+  can't point at another tenant's project (Postgres enforces this with
+  tenant-local composite FKs; the memory adapter checks ownership). This holds
+  **even if the connection is a superuser**, which silently bypasses RLS.
+- **Row-Level Security as the second layer.** `ENABLE` **and** `FORCE ROW LEVEL
+  SECURITY` (applies even to the table owner). The app connects as a
+  **non-superuser, `NOBYPASSRLS`** role. Isolation **fails closed**: the policy
+  is `tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid`, so
+  an unset/empty setting selects zero rows instead of erroring or leaking.
 
-Verified directly: under the restricted role, the seed tenant sees 39 tasks, a
-different tenant sees 0, and an unset tenant sees 0.
+Realtime is tenant-scoped too: the per-tenant fanout only delivers a tenant's
+events to that tenant's subscribers — one tenant's writes never reach another's
+WebSocket.
+
+Verified by an adversarial [cross-adapter isolation suite](../server/internal/store/storetest/isolation.go)
+that **both** the memory and Postgres backends run: holding tenant A's exact row
+ids, tenant B is denied every read/mutate/delete, sees nothing in list/bootstrap,
+can't forge a cross-tenant reference, and receives none of A's realtime events —
+while A's own data is proven intact. The Postgres suite runs under the restricted
+role against a live database (`TEST_DATABASE_URL`); it caught a real leak when the
+app relied on RLS alone and a superuser connection bypassed it — which is why the
+explicit predicates exist.
 
 See [SCHEMA.md](./SCHEMA.md) for the policies and [MIGRATIONS.md](./MIGRATIONS.md)
 for why this model keeps migrations cheap.

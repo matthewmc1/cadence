@@ -10,12 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cadence/server/internal/mailer"
 	"github.com/cadence/server/internal/store"
 )
 
 type Server struct {
-	store store.Store
-	log   *slog.Logger
+	store    store.Store
+	log      *slog.Logger
+	mailer   mailer.Mailer
+	authRate *authLimiter
 
 	webURL        string
 	cookieName    string
@@ -34,6 +37,7 @@ type Options struct {
 	SessionTTL    time.Duration
 	LoginTokenTTL time.Duration
 	DevAuth       bool
+	Mailer        mailer.Mailer
 	Log           *slog.Logger
 }
 
@@ -46,9 +50,15 @@ func New(st store.Store, opts Options) *Server {
 	if len(origins) == 0 {
 		origins = []string{"localhost:*", "127.0.0.1:*"}
 	}
+	ml := opts.Mailer
+	if ml == nil {
+		ml = mailer.New("", "", log) // dev mailer: log links only
+	}
 	return &Server{
 		store:         st,
 		log:           log,
+		mailer:        ml,
+		authRate:      newAuthLimiter(),
 		webURL:        opts.WebURL,
 		cookieName:    orStr(opts.CookieName, "cadence_session"),
 		cookieSecure:  opts.CookieSecure,

@@ -16,6 +16,7 @@ import (
 
 	"github.com/cadence/server/internal/config"
 	"github.com/cadence/server/internal/httpapi"
+	"github.com/cadence/server/internal/mailer"
 	"github.com/cadence/server/internal/store"
 	"github.com/cadence/server/internal/store/memory"
 	"github.com/cadence/server/internal/store/postgres"
@@ -36,6 +37,9 @@ func main() {
 	}
 	defer st.Close()
 
+	ml := mailer.New(cfg.ResendAPIKey, cfg.MailFrom, log)
+	log.Info("mailer configured", "provider", mailerName(cfg.ResendAPIKey), "delivers", ml.Live())
+
 	srv := httpapi.New(st, httpapi.Options{
 		WebOrigins:    cfg.WebOrigins,
 		WebURL:        cfg.WebURL,
@@ -44,6 +48,7 @@ func main() {
 		SessionTTL:    cfg.SessionTTL,
 		LoginTokenTTL: cfg.LoginTokenTTL,
 		DevAuth:       cfg.DevAuth,
+		Mailer:        ml,
 		Log:           log,
 	})
 
@@ -68,6 +73,13 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
+}
+
+func mailerName(apiKey string) string {
+	if apiKey == "" {
+		return "dev (log only)"
+	}
+	return "resend"
 }
 
 func newStore(ctx context.Context, cfg config.Config, log *slog.Logger) (store.Store, error) {

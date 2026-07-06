@@ -66,7 +66,7 @@ func (s *Store) FindOrCreateAccount(ctx context.Context, email string) (domain.A
 func (s *Store) GetUser(ctx context.Context, tenantID, userID string) (domain.User, error) {
 	var email string
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		e := tx.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email)
+		e := tx.QueryRow(ctx, `SELECT email FROM users WHERE id = $1 AND tenant_id = $2`, userID, tenantID).Scan(&email)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return domain.ErrNotFound
 		}

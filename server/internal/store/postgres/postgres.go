@@ -156,7 +156,7 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 		}
 
 		var email string
-		if e := tx.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT email FROM users WHERE id = $1 AND tenant_id = $2`, userID, tenantID).Scan(&email); e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
 				return domain.ErrNotFound
 			}
@@ -164,19 +164,19 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 		}
 		boot.User = domain.DeriveUser(userID, tenantID, email)
 
-		clients, err := selectClients(ctx, tx)
+		clients, err := selectClients(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
 		boot.Clients = clients
 
-		projects, err := selectProjects(ctx, tx)
+		projects, err := selectProjects(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
 		boot.Projects = projects
 
-		tasks, err := selectTasks(ctx, tx, "")
+		tasks, err := selectTasks(ctx, tx, tenantID, "")
 		if err != nil {
 			return err
 		}
@@ -202,16 +202,11 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 func (s *Store) ListTasks(ctx context.Context, tenantID string, f store.TaskFilter) ([]domain.Task, error) {
 	var out []domain.Task
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		where := ""
+		extra := ""
 		var args []any
 		add := func(cond string, v any) {
 			args = append(args, v)
-			if where == "" {
-				where = " WHERE "
-			} else {
-				where += " AND "
-			}
-			where += fmt.Sprintf(cond, len(args))
+			extra += " AND " + fmt.Sprintf(cond, len(args)+1) // +1: $1 is tenant_id in selectTasks
 		}
 		if f.Status != nil {
 			add("status = $%d::task_status", string(*f.Status))
@@ -219,7 +214,7 @@ func (s *Store) ListTasks(ctx context.Context, tenantID string, f store.TaskFilt
 		if f.ProjectID != nil {
 			add("project_id = $%d", *f.ProjectID)
 		}
-		tasks, err := selectTasks(ctx, tx, where, args...)
+		tasks, err := selectTasks(ctx, tx, tenantID, extra, args...)
 		if err != nil {
 			return err
 		}
@@ -232,7 +227,7 @@ func (s *Store) ListTasks(ctx context.Context, tenantID string, f store.TaskFilt
 func (s *Store) GetTask(ctx context.Context, tenantID, id string) (*domain.Task, error) {
 	var t *domain.Task
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		got, err := getTaskTx(ctx, tx, id, false)
+		got, err := getTaskTx(ctx, tx, tenantID, id, false)
 		if err != nil {
 			return err
 		}
@@ -245,7 +240,7 @@ func (s *Store) GetTask(ctx context.Context, tenantID, id string) (*domain.Task,
 func (s *Store) ListProjects(ctx context.Context, tenantID string) ([]domain.Project, error) {
 	var out []domain.Project
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		projects, err := selectProjects(ctx, tx)
+		projects, err := selectProjects(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
@@ -255,8 +250,12 @@ func (s *Store) ListProjects(ctx context.Context, tenantID string) ([]domain.Pro
 	return out, err
 }
 
-func selectTasks(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]domain.Task, error) {
-	rows, err := tx.Query(ctx, `SELECT `+taskCols+` FROM tasks`+where+` ORDER BY position, created_at`, args...)
+// selectTasks always fences by tenant_id ($1) as its own predicate — isolation
+// must not depend solely on RLS, which superuser / BYPASSRLS roles skip. Any
+// caller filters go in extraWhere with placeholders starting at $2.
+func selectTasks(ctx context.Context, tx pgx.Tx, tenantID, extraWhere string, args ...any) ([]domain.Task, error) {
+	all := append([]any{tenantID}, args...)
+	rows, err := tx.Query(ctx, `SELECT `+taskCols+` FROM tasks WHERE tenant_id = $1`+extraWhere+` ORDER BY position, created_at`, all...)
 	if err != nil {
 		return nil, err
 	}
@@ -271,12 +270,12 @@ func selectTasks(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]d
 	return out, nil
 }
 
-func getTaskTx(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (*domain.Task, error) {
-	q := `SELECT ` + taskCols + ` FROM tasks WHERE id = $1`
+func getTaskTx(ctx context.Context, tx pgx.Tx, tenantID, id string, forUpdate bool) (*domain.Task, error) {
+	q := `SELECT ` + taskCols + ` FROM tasks WHERE id = $1 AND tenant_id = $2`
 	if forUpdate {
 		q += ` FOR UPDATE`
 	}
-	rows, err := tx.Query(ctx, q, id)
+	rows, err := tx.Query(ctx, q, id, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -291,10 +290,10 @@ func getTaskTx(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (*doma
 	return &t, nil
 }
 
-func selectProjects(ctx context.Context, tx pgx.Tx) ([]domain.Project, error) {
+func selectProjects(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.Project, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, tenant_id::text, client_id::text, name, subtitle, due, color, version, created_at, updated_at
-		FROM projects ORDER BY created_at`)
+		FROM projects WHERE tenant_id = $1 ORDER BY created_at`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +314,7 @@ func selectProjects(ctx context.Context, tx pgx.Tx) ([]domain.Project, error) {
 		return nil, err
 	}
 
-	mrows, err := tx.Query(ctx, `SELECT project_id::text, user_id::text, initial, color FROM project_members`)
+	mrows, err := tx.Query(ctx, `SELECT project_id::text, user_id::text, initial, color FROM project_members WHERE tenant_id = $1`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +391,7 @@ func (s *Store) CreateTask(ctx context.Context, tenantID, actorID string, in dom
 		if err := insertTask(ctx, tx, t); err != nil {
 			return err
 		}
-		got, err := getTaskTx(ctx, tx, t.ID, false)
+		got, err := getTaskTx(ctx, tx, tenantID, t.ID, false)
 		if err != nil {
 			return err
 		}
@@ -409,7 +408,7 @@ func (s *Store) UpdateTask(ctx context.Context, tenantID, actorID, id string, pa
 	now := time.Now().UTC()
 	var updated *domain.Task
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		existing, err := getTaskTx(ctx, tx, id, true)
+		existing, err := getTaskTx(ctx, tx, tenantID, id, true)
 		if err != nil {
 			return err
 		}
@@ -427,14 +426,14 @@ func (s *Store) UpdateTask(ctx context.Context, tenantID, actorID, id string, pa
 				effort_minutes = $6, urgent = $7, note = $8, place = $9,
 				scheduled_at = $10, position = $11, done_at = $12, deadline = $13, recurrence = $14,
 				links = $15::jsonb, subtasks = $16::jsonb, assignees = $17::jsonb, version = $18, important = $19, reflection = $20
-			WHERE id = $1`,
+			WHERE id = $1 AND tenant_id = $21`,
 			id, next.ProjectID, next.Title, string(next.Kind), string(next.Status), next.EffortMinutes,
 			next.Urgent, next.Note, next.Place, next.ScheduledAt,
 			next.Position, next.DoneAt, next.Deadline, next.Recurrence,
-			jsonArr(next.Links), jsonArr(next.Subtasks), jsonArr(next.Assignees), next.Version, next.Important, next.Reflection); err != nil {
+			jsonArr(next.Links), jsonArr(next.Subtasks), jsonArr(next.Assignees), next.Version, next.Important, next.Reflection, tenantID); err != nil {
 			return err
 		}
-		got, err := getTaskTx(ctx, tx, id, false)
+		got, err := getTaskTx(ctx, tx, tenantID, id, false)
 		if err != nil {
 			return err
 		}
@@ -449,7 +448,7 @@ func (s *Store) UpdateTask(ctx context.Context, tenantID, actorID, id string, pa
 
 func (s *Store) DeleteTask(ctx context.Context, tenantID, actorID, id string) error {
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		ct, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
+		ct, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 		if err != nil {
 			return err
 		}
@@ -524,7 +523,7 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 		var p domain.Project
 		err := tx.QueryRow(ctx, `
 			SELECT id::text, tenant_id::text, client_id::text, name, subtitle, due, color, version, created_at, updated_at
-			FROM projects WHERE id = $1 FOR UPDATE`, id).
+			FROM projects WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, id, tenantID).
 			Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
@@ -560,11 +559,11 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 		}
 		p.Version++
 		if _, err := tx.Exec(ctx,
-			`UPDATE projects SET name=$2, subtitle=$3, due=$4, color=$5, version=$6, client_id=$7 WHERE id=$1`,
-			id, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.ClientID); err != nil {
+			`UPDATE projects SET name=$2, subtitle=$3, due=$4, color=$5, version=$6, client_id=$7 WHERE id=$1 AND tenant_id=$8`,
+			id, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.ClientID, tenantID); err != nil {
 			return err
 		}
-		members, err := projectMembers(ctx, tx, id)
+		members, err := projectMembers(ctx, tx, tenantID, id)
 		if err != nil {
 			return err
 		}
@@ -580,7 +579,7 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 
 func (s *Store) DeleteProject(ctx context.Context, tenantID, actorID, id string) error {
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		ct, err := tx.Exec(ctx, `DELETE FROM projects WHERE id = $1`, id)
+		ct, err := tx.Exec(ctx, `DELETE FROM projects WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 		if err != nil {
 			return err
 		}
@@ -594,8 +593,8 @@ func (s *Store) DeleteProject(ctx context.Context, tenantID, actorID, id string)
 	})
 }
 
-func projectMembers(ctx context.Context, tx pgx.Tx, projectID string) ([]domain.ProjectMember, error) {
-	rows, err := tx.Query(ctx, `SELECT user_id::text, initial, color FROM project_members WHERE project_id = $1`, projectID)
+func projectMembers(ctx context.Context, tx pgx.Tx, tenantID, projectID string) ([]domain.ProjectMember, error) {
+	rows, err := tx.Query(ctx, `SELECT user_id::text, initial, color FROM project_members WHERE project_id = $1 AND tenant_id = $2`, projectID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -613,10 +612,10 @@ func projectMembers(ctx context.Context, tx pgx.Tx, projectID string) ([]domain.
 
 // ---- client reads / writes -------------------------------------------------
 
-func selectClients(ctx context.Context, tx pgx.Tx) ([]domain.Client, error) {
+func selectClients(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.Client, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, tenant_id::text, name, tier, kind, color, expected_touch_days, archived_at, version, created_at, updated_at
-		FROM clients ORDER BY created_at`)
+		FROM clients WHERE tenant_id = $1 ORDER BY created_at`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -636,7 +635,7 @@ func selectClients(ctx context.Context, tx pgx.Tx) ([]domain.Client, error) {
 func (s *Store) ListClients(ctx context.Context, tenantID string) ([]domain.Client, error) {
 	var out []domain.Client
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		clients, err := selectClients(ctx, tx)
+		clients, err := selectClients(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
@@ -689,7 +688,7 @@ func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, 
 		var c domain.Client
 		err := tx.QueryRow(ctx, `
 			SELECT id::text, tenant_id::text, name, tier, kind, color, expected_touch_days, archived_at, version, created_at, updated_at
-			FROM clients WHERE id = $1 FOR UPDATE`, id).
+			FROM clients WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, id, tenantID).
 			Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color,
 				&c.ExpectedTouchDays, &c.ArchivedAt, &c.Version, &c.CreatedAt, &c.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -738,8 +737,8 @@ func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, 
 		// RETURNING updated_at so the response/event carry the trigger-bumped
 		// timestamp (matches the memory adapter, which sets UpdatedAt to now).
 		if err := tx.QueryRow(ctx,
-			`UPDATE clients SET name=$2, tier=$3, kind=$4, color=$5, expected_touch_days=$6, archived_at=$7, version=$8 WHERE id=$1 RETURNING updated_at`,
-			id, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.ArchivedAt, c.Version).Scan(&c.UpdatedAt); err != nil {
+			`UPDATE clients SET name=$2, tier=$3, kind=$4, color=$5, expected_touch_days=$6, archived_at=$7, version=$8 WHERE id=$1 AND tenant_id=$9 RETURNING updated_at`,
+			id, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.ArchivedAt, c.Version, tenantID).Scan(&c.UpdatedAt); err != nil {
 			return err
 		}
 		updated = &c
@@ -754,7 +753,7 @@ func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, 
 func (s *Store) DeleteClient(ctx context.Context, tenantID, actorID, id string) error {
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		// projects.client_id is ON DELETE SET NULL, so projects are detached automatically.
-		ct, err := tx.Exec(ctx, `DELETE FROM clients WHERE id = $1`, id)
+		ct, err := tx.Exec(ctx, `DELETE FROM clients WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 		if err != nil {
 			return err
 		}

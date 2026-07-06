@@ -27,9 +27,14 @@ type Config struct {
 	CookieSecure  bool
 	SessionTTL    time.Duration
 	LoginTokenTTL time.Duration
-	// DevAuth returns the magic link in the API response + logs it (no real
-	// email delivery is wired). Turn OFF in production.
+	// DevAuth returns the magic link in the API response + logs it. Handy for
+	// local dev; turn OFF in production so links are only delivered by email.
 	DevAuth bool
+
+	// Email (magic-link delivery). When ResendAPIKey is empty, links are only
+	// logged (dev mailer). MailFrom must be a Resend-verified sender in prod.
+	ResendAPIKey string
+	MailFrom     string
 }
 
 func Load() Config {
@@ -45,6 +50,8 @@ func Load() Config {
 		SessionTTL:    time.Duration(envInt("CADENCE_SESSION_DAYS", 30)) * 24 * time.Hour,
 		LoginTokenTTL: time.Duration(envInt("CADENCE_LOGIN_MINUTES", 15)) * time.Minute,
 		DevAuth:       envBool("CADENCE_DEV_AUTH", true),
+		ResendAPIKey:  env("RESEND_API_KEY", ""),
+		MailFrom:      env("MAIL_FROM", ""),
 	}
 }
 

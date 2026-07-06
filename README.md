@@ -65,54 +65,72 @@ the **Live** indicator in the header).
 
 ## Quickstart
 
-**Prereqs:** Node 18+, Go 1.22+. (Postgres optional — see below.)
+**Prereqs:** Node 18+, Go 1.22+, Docker (for the database).
 
 ```bash
-# 1) backend (in-memory; runs anywhere, no external services)
-cd server
-go run ./cmd/cadence-server          # serves http://localhost:8088
-
-# 2) web app (in another terminal, from the repo root)
-npm install
-npm run dev                          # serves http://localhost:5173
+./dev.sh
 ```
 
-Open http://localhost:5173. You'll see a **sign-in** screen — enter any email
-and click **"Open magic link →"** (in dev the link is shown right there; no
-email is sent). That creates your personal workspace and you're in. Open it in
-two tabs to watch changes sync live.
+One script is the whole local stack: it brings up Postgres in Docker (a **named
+volume**, so your data survives restarts), applies the migrations, builds and
+runs the API on `http://localhost:8088`, and starts the web app on
+`http://localhost:5173`. Stop with `Ctrl-C` — the database keeps running (and
+keeps your data), so the next `./dev.sh` is instant. (`make dev` is equivalent.)
 
+Open http://localhost:5173. You'll see a **sign-in** screen — enter your email.
+With no mail provider configured the magic link is shown right there (dev mode),
+so you can click straight through; wire up Resend (below) to receive it by email
+instead. Signing in creates your personal workspace. Open it in two tabs to
+watch changes sync live.
+
+> **Your data is durable by default.** `./dev.sh` runs the Postgres backend
+> backed by the `cadence_pgdata` Docker volume, so nothing is lost on restart.
+> To run the throwaway in-memory backend instead (no Docker, wiped on exit):
+> `CADENCE_BACKEND=memory ./dev.sh`.
+>
 > The web app talks to `http://localhost:8088` by default (override with
 > `VITE_API_URL`). The magic link automatically points back to whichever origin
 > served the app (`5173` for `npm run dev`, `4173` for `npm run preview`), as
 > long as it's in `CADENCE_WEB_ORIGINS`.
 
-## Run on Postgres (production mode)
+### Email delivery (Resend)
+
+Magic-link email is delivered through [Resend](https://resend.com). Set an API
+key and delivery goes live; leave it unset and links are logged/returned for dev.
 
 ```bash
-docker run -d --name cadence-pg -e POSTGRES_PASSWORD=cadence -e POSTGRES_DB=cadence \
-  -p 5433:5432 postgres:16-alpine
+cp .env.example .env
+# edit .env → RESEND_API_KEY=re_...   (optionally MAIL_FROM="Cadence <you@yourdomain>")
+./dev.sh    # reads .env automatically
+```
 
+## Run Postgres yourself
+
+`./dev.sh` manages the database for you via [`docker-compose.yml`](./docker-compose.yml)
+(port `55432` by default, override with `CADENCE_DB_PORT`). To point at an
+existing Postgres instead:
+
+```bash
 cd server
 CADENCE_BACKEND=postgres \
-DATABASE_URL='postgres://postgres:cadence@localhost:5433/cadence?sslmode=disable' \
+DATABASE_URL='postgres://cadence:cadence@localhost:55432/cadence?sslmode=disable' \
 go run ./cmd/cadence-server
 ```
 
-On boot the server applies the embedded migrations (there's no demo data —
-sign in to create your workspace). Realtime now flows through the transactional
-outbox and Postgres `LISTEN/NOTIFY`, so it fans out across multiple instances.
+On boot the server applies the embedded migrations (there's no demo data — sign
+in to create your workspace). Realtime flows through the transactional outbox and
+Postgres `LISTEN/NOTIFY`, so it fans out across multiple instances.
 
 > **Production note:** connect as a **non-superuser** role (superusers bypass
 > Row-Level Security). Create it with
 > [`server/scripts/app-role.sql`](./server/scripts/app-role.sql) and point
-> `DATABASE_URL` at `cadence_app`. See
+> `DATABASE_URL` at `cadence_app`. Tenant isolation is **defense-in-depth** —
+> explicit `tenant_id` predicates on every query *and* RLS — so a row never
+> leaks even if a query is run as a superuser. See
 > [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md#multi-tenancy).
 >
-> **Auth is real (session-based magic links).** The only stub is email
-> *delivery* — no SMTP/provider is wired, so in dev the link is logged and
-> returned (`CADENCE_DEV_AUTH`). For production, send `link` by email, set
-> `CADENCE_DEV_AUTH=false`, and serve over HTTPS with `CADENCE_COOKIE_SECURE=true`.
+> For production also set `CADENCE_DEV_AUTH=false` and serve over HTTPS with
+> `CADENCE_COOKIE_SECURE=true`.
 
 ## Configuration
 
@@ -124,8 +142,11 @@ outbox and Postgres `LISTEN/NOTIFY`, so it fans out across multiple instances.
 | `CADENCE_AUTO_MIGRATE` | `true` | apply migrations on boot |
 | `CADENCE_WEB_URL` | `http://localhost:4173` | where the SPA lives (used in magic links) |
 | `CADENCE_WEB_ORIGINS` | `localhost:*,127.0.0.1:*` | CORS + WebSocket origin allowlist |
-| `CADENCE_DEV_AUTH` | `true` | return/log the magic link (no email transport wired) |
+| `RESEND_API_KEY` | — | [Resend](https://resend.com) key; unset ⇒ links logged, not emailed |
+| `MAIL_FROM` | `Cadence <onboarding@resend.dev>` | magic-link sender address |
+| `CADENCE_DEV_AUTH` | `true` | return/log the magic link when no live mailer is configured |
 | `CADENCE_COOKIE_SECURE` | `false` | set `true` behind HTTPS |
+| `CADENCE_DB_PORT` | `55432` | host port the Compose Postgres binds |
 | `VITE_API_URL` (web) | `http://localhost:8088` | API base URL |
 
 ## Auth (magic link)
@@ -133,8 +154,10 @@ outbox and Postgres `LISTEN/NOTIFY`, so it fans out across multiple instances.
 Cadence has native, passwordless auth — **we store only your email**:
 
 1. Enter your email → `POST /auth/request` issues a one-time link.
-2. The link (`/auth?token=…`) is emailed in production; in dev (`CADENCE_DEV_AUTH=true`)
-   it's logged and returned so you can click it immediately.
+2. The link (`/auth?token=…`) is emailed via **Resend** when `RESEND_API_KEY` is
+   set; with no provider (dev) it's logged and returned so you can click it
+   immediately. The endpoint is rate-limited per IP and per email (magic-link
+   email is a bombing / cost-amplification target).
 3. Opening it → `POST /auth/verify` creates your **personal tenant** on first
    sign-in, starts a session, and sets an **HttpOnly cookie**.
 4. Every API/WS call is then scoped to your tenant by that session — no
