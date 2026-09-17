@@ -1,17 +1,52 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { View } from '../state/types';
 import { useApp, useActions } from '../state/store';
 
-const TABS: { view: View; label: string }[] = [
-  { view: 'today', label: 'Today' },
-  { view: 'plan', label: 'Plan' },
-  { view: 'board', label: 'Board' },
+/* Line icons for the four tabs — shown beside the label on narrow screens,
+   where the words alone would crowd the bar. 16px, 1.5px stroke, currentColor. */
+const ICON_ATTRS = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+const ICONS: Record<Exclude<View, 'add'>, ReactNode> = {
+  inbox: (
+    <svg {...ICON_ATTRS} aria-hidden>
+      <path d="M4 13V6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5V13" />
+      <path d="M4 13h4.5l1.5 2.5h4l1.5-2.5H20v4.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5V13z" />
+    </svg>
+  ),
+  work: (
+    <svg {...ICON_ATTRS} aria-hidden>
+      <path d="M5 7h14M5 12h14M5 17h9" />
+    </svg>
+  ),
+  projects: (
+    <svg {...ICON_ATTRS} aria-hidden>
+      <path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h4l2 2.5h7A1.5 1.5 0 0 1 20 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" />
+    </svg>
+  ),
+  insights: (
+    <svg {...ICON_ATTRS} aria-hidden>
+      <path d="M4 18l5-6 4 3 7-9" />
+    </svg>
+  ),
+};
+
+/**
+ * Four: Inbox · Work · Projects · Insights. Work is the home surface — today's
+ * strip, the "when" control and the register all sit on it, so there is no
+ * separate Plan tab to visit. Projects is where work is organised (PARA):
+ * what each project is for, by when, and the actions that serve it.
+ */
+const TABS: { view: Exclude<View, 'add'>; label: string }[] = [
+  { view: 'inbox', label: 'Inbox' },
+  { view: 'work', label: 'Work' },
+  { view: 'projects', label: 'Projects' },
   { view: 'insights', label: 'Insights' },
 ];
 
 export function AppHeader() {
-  const { view, now, connection, editorOpen, editorMode, user } = useApp();
+  const { view, now, connection, editorOpen, editorMode, user, inbox } = useApp();
   const { go, openCreate, signOut, openTokens } = useActions();
+  // the brand goes where the app lands: the inbox while it has items, else Work
+  const home: View = inbox.count > 0 ? 'inbox' : 'work';
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -27,7 +62,7 @@ export function AppHeader() {
   return (
     <header className="appbar">
       <div className="appbar__inner">
-        <button className="appbar__brand" onClick={() => go('today')} aria-label="Cadence — Today">
+        <button className="appbar__brand" onClick={() => go(home)} aria-label="Cadence — home">
           <span className="wordmark__name" style={{ fontSize: 22 }}>
             Cadence
           </span>
@@ -37,14 +72,22 @@ export function AppHeader() {
         <nav className="appbar__nav" aria-label="Primary">
           {TABS.map((t) => {
             const active = view === t.view;
+            const badge = t.view === 'inbox' && inbox.count > 0 ? inbox.count : 0;
             return (
               <button
                 key={t.view}
                 className={'tab' + (active ? ' tab--active' : '')}
                 onClick={() => go(t.view)}
                 aria-current={active ? 'page' : undefined}
+                aria-label={badge ? `${t.label}, ${badge} to triage` : undefined}
               >
-                {t.label}
+                <span className="tab__icon">{ICONS[t.view]}</span>
+                <span className="tab__label">{t.label}</span>
+                {badge > 0 && (
+                  <span className="tab__badge tnum" aria-hidden>
+                    {badge > 99 ? '99+' : badge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -68,7 +111,7 @@ export function AppHeader() {
             className={'appbar__new' + (editorOpen && editorMode === 'create' ? ' appbar__new--active' : '')}
             onClick={openCreate}
           >
-            <span aria-hidden>+</span> New task
+            <span aria-hidden>+</span> New
           </button>
           <div className="appbar__account" ref={menuRef}>
             <button

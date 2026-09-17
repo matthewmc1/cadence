@@ -1,6 +1,15 @@
 .board {
   padding: 0;
 }
+/* inside Work (its "Board" mode) the outer view already carries the gutters */
+.board--embedded .board__header,
+.board--embedded .board__cols {
+  padding-left: 0;
+  padding-right: 0;
+}
+.board--embedded .board__header {
+  padding-top: 8px;
+}
 
 /* ---- project switcher ---- */
 .board__switch {
@@ -8,7 +17,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 16px 44px 0;
+  padding: 16px var(--gutter) 0;
 }
 .board__switch-label {
   font-size: 10.5px;
@@ -79,13 +88,13 @@
 
 /* ---- project header ---- */
 .board__header {
-  padding: 26px 44px 20px;
+  padding: 26px var(--gutter) 20px;
   border-bottom: 1px solid var(--line-3);
 }
 .board__head-row {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 24px;
 }
 .board__name {
@@ -154,7 +163,7 @@
 .board__cols {
   display: flex;
   gap: 18px;
-  padding: 24px 44px 40px;
+  padding: 24px var(--gutter) 40px;
   align-items: flex-start;
   overflow-x: auto;
 }
@@ -360,7 +369,8 @@
 
 @media (max-width: 760px) {
   .board__header {
-    padding: 22px 20px 18px;
+    padding-top: 22px;
+    padding-bottom: 18px;
   }
   .board__head-row {
     flex-direction: column;
@@ -369,7 +379,16 @@
     flex-wrap: wrap;
   }
   .board__cols {
-    padding: 20px 20px 40px;
+    padding-top: 20px;
+  }
+  /* one column at a time, snapping — a kanban never shrinks below thumb width */
+  .board__col {
+    flex: 0 0 min(280px, 82vw);
+    scroll-snap-align: start;
+  }
+  .board__cols {
+    scroll-snap-type: x proximity;
+    scroll-padding-left: var(--gutter);
   }
 }
 
@@ -502,4 +521,65 @@
   border: none;
   border-radius: 8px;
   padding: 7px 12px;
+}
+.cpick__empty {
+  font-size: 12px;
+  color: var(--ink-4);
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+/* portal variant: positioned via fixed coords, so no overflow ancestor clips it */
+.cpick__menu--fixed {
+  position: fixed;
+  top: auto;
+  left: auto;
+}
+
+/* a card's why · when · where: hidden by default, shown by a wide lane (see para.css) */
+.bcard__ctx {
+  display: none;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-3);
+}
+
+/* ---- add an action, at the head of the Backlog lane ---- */
+.board__add {
+  display: flex;
+  gap: 6px;
+}
+.board__add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px dashed var(--line-dash);
+  border-radius: var(--r-md);
+  padding: 9px 12px;
+}
+.board__add-input::placeholder {
+  color: var(--ink-4);
+}
+.board__add-input:hover {
+  border-color: var(--line-strong);
+}
+.board__add-input:focus {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--paper);
+  outline: none;
+}
+.board__add-go {
+  flex: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 0 14px;
+  cursor: pointer;
 }

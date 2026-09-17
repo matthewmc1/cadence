@@ -2,7 +2,16 @@
 
 export type Kind = 'deep' | 'light' | 'admin' | 'meet' | 'personal';
 export type Status = 'backlog' | 'scheduled' | 'focus' | 'done';
+/** Work-item lifecycle — the successor to Status; the server derives one from the other. */
+export type Stage = 'todo' | 'doing' | 'waiting' | 'done';
 export type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly';
+
+/** What a work item asks of someone else (each field ≤ 2000 chars). */
+export interface Ask {
+  what: string;
+  forWhom: string;
+  why: string;
+}
 
 export interface Subtask {
   id: string;
@@ -38,16 +47,43 @@ export interface Task {
   links: Link[];
   subtasks: Subtask[];
   assignees: Assignee[];
+  // work-item fields (0013) — optional until every server is on 0013
+  stage?: Stage;
+  ownerId?: string | null;
+  createdBy?: string | null;
+  requirementId?: string | null;
+  definitionOfDone?: string;
+  waitingOnPersonId?: string | null;
+  waitingOnReason?: string;
+  waitingOnSince?: string | null;
+  ask?: Ask;
+  askBy?: string | null;
   version: number;
 }
 
 export interface Project {
   id: string;
   name: string;
-  subtitle: string; // the outcome / why
+  subtitle: string;
+  /** PARA: why the project exists / what finishing looks like. Absent on an older server. */
+  outcome?: string;
+  /** The area (or client) this project serves. */
+  clientId?: string | null;
+  /** Set once the project is in the archive — finished or set aside. */
+  archivedAt?: string | null;
   due: string | null;
   color: string;
   members: Assignee[];
+}
+
+/** A PARA area of responsibility (clients are one kind of it). */
+export interface Area {
+  id: string;
+  name: string;
+  kind: 'client' | 'internal' | 'area';
+  standard?: string; // what the area is held to
+  expectedTouchDays: number | null;
+  archivedAt: string | null;
 }
 
 export interface User {
@@ -60,6 +96,7 @@ export interface Bootstrap {
   tenant: { id: string; name: string };
   user: User;
   projects: Project[];
+  clients?: Area[];
   tasks: Task[];
 }
 
@@ -116,6 +153,15 @@ export interface CreateTaskInput {
   recurrence?: Recurrence;
   subtasks?: Subtask[];
   links?: Link[];
+  // work-item fields (0013); stage wins over status when both are given
+  stage?: Stage;
+  ownerId?: string | null;
+  requirementId?: string | null;
+  definitionOfDone?: string;
+  waitingOnPersonId?: string | null;
+  waitingOnReason?: string;
+  ask?: Ask;
+  askBy?: string | null;
 }
 
 export const api = {

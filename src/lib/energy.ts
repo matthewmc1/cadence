@@ -8,6 +8,8 @@
  * data so the product behaves consistently with the mockups.
  */
 
+import { clock } from './time';
+
 /* ---------------------------------------------------------------- task kinds */
 
 export type Kind = 'deep' | 'light' | 'admin' | 'meet' | 'personal';
@@ -250,13 +252,11 @@ export interface Slot {
   place: Place;
 }
 
-const HHMM = (hour: number): string => {
-  const h24 = Math.floor(hour);
-  const m = Math.round((hour - h24) * 60);
-  const ampm = h24 >= 12 ? 'PM' : 'AM';
-  const h12 = ((h24 + 11) % 12) + 1;
-  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
-};
+/**
+ * Plan's slot labels read on the same 24-hour clock as the app bar and every
+ * toast — one helper, so "2:00" can never mean either two o'clock.
+ */
+const HHMM = clock;
 
 export const fmtTime = HHMM;
 
@@ -271,17 +271,21 @@ function fit(kind: Kind, hour: number, profile: EnergyProfile = DEFAULT_PROFILE)
   const dipCenter = profile.dipHour + 0.5;
   switch (kind) {
     case 'deep':
-      // ride high energy, but settle into the heart of the peak
+      // ride high energy, but settle into the heart of the morning peak
       return e - Math.abs(hour - deepTarget) * 0.05;
     case 'admin':
       return 1 - Math.abs(hour - dipCenter) / 6; // gravitate to the dip
     case 'meet':
-      return 1 - Math.abs(hour - profile.dipHour) / 6; // early afternoon
+      // conversations sit in the early-to-mid afternoon, after the dip
+      return 1 - Math.abs(hour - (profile.dipHour + 1)) / 6;
     case 'personal':
-      return hour >= 12 ? 0.6 : 0.4;
+      // evenings first, then later afternoon — never the protected morning peak
+      return hour >= 17 ? 0.85 : hour >= 14 ? 0.6 : hour >= 12 ? 0.5 : 0.3;
     case 'light':
     default:
-      return 0.5 + e * 0.3;
+      // the afternoon rebound (~3pm) — out of the way of deep morning work,
+      // so light tasks don't pile onto the peak alongside everything else
+      return 0.72 - Math.abs(hour - 15) / 10;
   }
 }
 
@@ -290,7 +294,7 @@ function fit(kind: Kind, hour: number, profile: EnergyProfile = DEFAULT_PROFILE)
  * and afternoons, preferring earlier days so deadlines have slack.
  */
 export function bestSlot(kind: Kind, fromDayIndex = 0, profile: EnergyProfile = DEFAULT_PROFILE): Slot {
-  const candidateHours = [8.5, 9, 9.5, 10, 11, 11.5, 13, 14, 15, 15.5, 16];
+  const candidateHours = [8.5, 9, 9.5, 10, 11, 12, 13, 14, 15, 16, 17, 18];
   let best: Slot | null = null;
   let bestScore = -Infinity;
 

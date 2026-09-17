@@ -28,15 +28,23 @@ func (s *Store) ConsumeLoginToken(ctx context.Context, tokenHash string) (string
 	return email, err
 }
 
-func (s *Store) FindOrCreateAccount(ctx context.Context, email string) (domain.Account, error) {
+func (s *Store) FindAccount(ctx context.Context, email string) (domain.Account, error) {
 	var acc domain.Account
 	err := s.pool.QueryRow(ctx,
 		`SELECT email, tenant_id::text, user_id::text FROM accounts WHERE email = $1`, email).
 		Scan(&acc.Email, &acc.TenantID, &acc.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Account{}, domain.ErrNotFound
+	}
+	return acc, err
+}
+
+func (s *Store) FindOrCreateAccount(ctx context.Context, email string) (domain.Account, error) {
+	acc, err := s.FindAccount(ctx, email)
 	if err == nil {
 		return acc, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, domain.ErrNotFound) {
 		return domain.Account{}, err
 	}
 

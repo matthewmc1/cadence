@@ -8,6 +8,11 @@
 #   CADENCE_BACKEND=memory ./dev.sh   # in-memory (NOT persisted — data lost on restart)
 #
 # Env is read from ./.env if present (e.g. RESEND_API_KEY for real magic-link email).
+#
+# ./dev.sh never serves the embedded web app: Vite on :5173 is the front here
+# and the API on :8088 is API-only. A build left in server/internal/web/dist
+# by `make web-embed` is cleared before the dev binary is built, so a stale
+# SPA can't be baked in and served from :8088 beside the live one.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -21,6 +26,9 @@ if [ -f .env ]; then set -a; . ./.env; set +a; fi
 
 BACKEND="${CADENCE_BACKEND:-postgres}"
 DB_PORT="${CADENCE_DB_PORT:-55432}"
+# docker-compose.yml deliberately has no default DB password (a private host
+# must choose one). For local dev the throwaway `cadence` is fine.
+export CADENCE_DB_PASSWORD="${CADENCE_DB_PASSWORD:-cadence}"
 
 pids=()
 cleanup() {
@@ -50,7 +58,7 @@ if [ "$BACKEND" = "postgres" ]; then
     || die "Postgres did not become ready. Check 'docker compose logs db'."
 
   export CADENCE_BACKEND=postgres
-  export DATABASE_URL="${DATABASE_URL:-postgres://cadence:cadence@localhost:${DB_PORT}/cadence?sslmode=disable}"
+  export DATABASE_URL="${DATABASE_URL:-postgres://cadence:${CADENCE_DB_PASSWORD}@localhost:${DB_PORT}/cadence?sslmode=disable}"
   log "backend: Postgres — data persists in the 'cadence_pgdata' volume ✓"
 else
   export CADENCE_BACKEND=memory
@@ -58,6 +66,10 @@ else
 fi
 
 # --- API server (auto-migrates on boot) ---
+if [ -f server/internal/web/dist/index.html ]; then
+  log "clearing the embedded web build from a previous 'make web-embed' (dev serves the API only)"
+  find server/internal/web/dist -mindepth 1 -not -name .gitkeep -delete
+fi
 log "building API server…"
 mkdir -p server/bin
 ( cd server && go build -o ./bin/cadence-server ./cmd/cadence-server )

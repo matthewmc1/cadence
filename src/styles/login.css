@@ -87,6 +87,17 @@
   display: flex;
   flex-direction: column;
 }
+/* why a resend produced no new link — the cooldown, said out loud */
+.login__note {
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--surface-rail);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
 .login__devlink {
   display: inline-block;
   align-self: flex-start;
@@ -120,4 +131,8 @@
   font-style: italic;
   font-size: 14px;
   color: var(--ink-4);
+  /* one calm line under the panel — centred if a narrow screen wraps it */
+  max-width: 420px;
+  text-align: center;
+  text-wrap: balance;
 }

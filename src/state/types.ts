@@ -1,6 +1,34 @@
 import type { Kind } from '../lib/energy';
 
-export type View = 'today' | 'add' | 'insights' | 'plan' | 'board';
+/** The four tabs (Inbox · Work · Projects · Insights) plus the capture surface. Today and the "when" live inside Work; Projects is the PARA page, and each project's Board is a mode of it. */
+export type View = 'inbox' | 'work' | 'projects' | 'insights' | 'add';
+
+/**
+ * A view collapsed out of the nav but not out of the codebase (Plan). Nothing
+ * routes here — `go` redirects it to Work — so an older link or a call left in
+ * a surface we don't own still lands somewhere real.
+ */
+export type ParkedView = 'plan';
+
+/** How a project is looked at on the Projects tab: its actions list, or its kanban. (Named from when Board was a mode of Work.) */
+export type WorkMode = 'list' | 'board';
+
+/* ----------------------------------------------------------------- Inbox */
+
+/** Bundled (grouped by project → person → kind) or flat chronological — one key apart. */
+export type InboxMode = 'bundled' | 'flat';
+
+/** How a bundle was formed, so the view can style the header. */
+export type InboxBundleKind = 'project' | 'person' | 'kind';
+
+export interface InboxBundle<S = unknown> {
+  key: string; // 'project:<id>' | 'person:<name|email>' | 'kind:<signalKind>'
+  kind: InboxBundleKind;
+  label: string; // project name / participant name / "Emails"
+  sublabel?: string; // the project's client, when it has one
+  color?: string; // project or client colour
+  items: S[]; // most recent first
+}
 
 /* ----------------------------------------------------------------- Today */
 
@@ -34,6 +62,7 @@ export interface PlacedTask {
   title: string;
   kind: Kind;
   hour: number; // decimal
+  effortMinutes: number; // drives the block's height on the week grid
   weekend?: boolean;
   recurring?: boolean;
   done?: boolean;
@@ -75,6 +104,7 @@ export interface BacklogTask {
   important?: boolean;
   effortHrs: number;
   bestFitNote?: string; // 'Best fit → Tuesday morning'
+  projectId: string | null; // for inline reassignment from the rail
   project?: { name: string; color: string }; // backlog spans every project
 }
 

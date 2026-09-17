@@ -3,7 +3,11 @@ import { useState } from 'react';
 import { useApp, useActions } from '../state/store';
 import type { BoardColumn, BoardTask } from '../state/types';
 import { KINDS } from '../lib/energy';
+import { selectProjectProgress } from '../state/selectors';
 import { Avatar } from '../components/primitives';
+import { ProofStrip } from '../components/ProofStrip';
+import { StartStrip } from '../components/StartStrip';
+import { ContextLine } from '../components/ContextLine';
 
 const COLUMNS: { key: BoardColumn; label: string; aside?: string }[] = [
   { key: 'backlog', label: 'Backlog' },
@@ -25,104 +29,17 @@ const ADVANCE_LABEL: Record<BoardColumn, string> = {
   done: '',
 };
 
-const TIER_LABEL: Record<string, string> = { a: 'A', b: 'B', c: 'C' };
-
-function ClientPicker({ projectId, clientId }: { projectId: string; clientId: string | null }) {
-  const { clients } = useApp();
-  const { assignProjectClient, createClientForProject } = useActions();
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState('');
-  const current = clients.find((c) => c.id === clientId) ?? null;
-  // archived clients aren't offered as new options, but a project already on one
-  // still needs it in the list so its current-assignment label resolves.
-  const options = clients.filter((c) => !c.archivedAt || c.id === clientId);
-
-  const pick = (id: string | null) => {
-    if (id !== clientId) assignProjectClient(projectId, id);
-    setOpen(false);
-  };
-  const submitNew = () => {
-    const n = name.trim();
-    if (!n) return;
-    createClientForProject(projectId, { name: n });
-    setName('');
-    setCreating(false);
-    setOpen(false);
-  };
-  const close = () => {
-    setOpen(false);
-    setCreating(false);
-    setName('');
-  };
-
-  return (
-    <div className="cpick" onKeyDown={(e) => { if (e.key === 'Escape') close(); }}>
-      <button
-        className={'cpick__btn' + (current ? '' : ' cpick__btn--empty')}
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        {current ? (
-          <>
-            <span className="dot" style={{ width: 7, height: 7, background: current.color }} />
-            {current.name}
-          </>
-        ) : (
-          '+ Assign client'
-        )}
-        <span className="cpick__caret">▾</span>
-      </button>
-      {open && (
-        <>
-          <div className="cpick__scrim" onClick={close} />
-          <div className="cpick__menu" role="menu">
-            {options.map((c) => (
-              <button key={c.id} role="menuitem" className={'cpick__item' + (c.id === clientId ? ' is-on' : '')} onClick={() => pick(c.id)}>
-                <span className="dot" style={{ width: 7, height: 7, background: c.color }} />
-                <span className="cpick__item-name">{c.name}</span>
-                <span className="cpick__tier">{TIER_LABEL[c.tier] ?? c.tier}</span>
-              </button>
-            ))}
-            {clientId && (
-              <button role="menuitem" className="cpick__item cpick__item--none" onClick={() => pick(null)}>
-                No client
-              </button>
-            )}
-            <div className="cpick__sep" />
-            {creating ? (
-              <div className="cpick__new">
-                <input
-                  autoFocus
-                  className="cpick__new-input"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitNew();
-                    if (e.key === 'Escape') close();
-                  }}
-                  placeholder="Client name"
-                />
-                <button className="cpick__new-go" onClick={submitNew}>
-                  Add
-                </button>
-              </div>
-            ) : (
-              <button role="menuitem" className="cpick__item cpick__add" onClick={() => setCreating(true)}>
-                + New client
-              </button>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-export function BoardView() {
-  const { project, projects, selectedProjectId, highlightTaskId } = useApp();
-  const { moveBoard, autoScheduleRemaining, openEditor, selectProject, createProject } = useActions();
+/**
+ * The selected project's kanban. Board is no longer a tab: Work mounts it as
+ * its "Board" mode (`embedded`), where Work's own projects row does the
+ * switching and the outer view owns the scroll, so the switcher and the
+ * `viewbody` wrapper are left out.
+ */
+export function BoardView({ embedded = false }: { embedded?: boolean }) {
+  const { project, projects, selectedProjectId, highlightTaskId, allTasks, requirements, proofFor, startFor } = useApp();
+  const { moveBoard, autoScheduleRemaining, openEditor, selectProject, createProject, addProjectAction } = useActions();
+  const [newAction, setNewAction] = useState('');
+  const rootClass = embedded ? 'board board--embedded' : 'viewbody board';
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -134,7 +51,7 @@ export function BoardView() {
     setCreating(false);
   };
 
-  const switcher = (
+  const switcher = embedded ? null : (
     <div className="board__switch">
       <span className="board__switch-label">Projects</span>
       {projects.map((p) => (
@@ -174,7 +91,7 @@ export function BoardView() {
 
   if (!project) {
     return (
-      <div className="viewbody board">
+      <div className={rootClass}>
         {switcher}
         <div className="stage__state">
           <p className="stage__state-msg">No project yet — create one to start a board.</p>
@@ -184,7 +101,34 @@ export function BoardView() {
   }
 
   const byCol = (c: BoardColumn) => project.tasks.filter((t) => t.column === c);
-  const pct = project.total ? Math.round((project.done / project.total) * 100) : 0;
+  // requirements met where the project has any; tasks done otherwise
+  const progress = selectProjectProgress(project.id, allTasks, requirements);
+  const pct = progress.pct;
+
+  // Advance → done / → focus go through the store's one completion / start
+  // path, so the card that just moved grows its proof or start strip under it.
+  const withStrip = (t: BoardTask, card: JSX.Element) => {
+    const proof = proofFor?.id === t.id ? <ProofStrip task={proofFor} /> : null;
+    const start = startFor?.id === t.id ? <StartStrip task={startFor} /> : null;
+    if (!proof && !start) return card;
+    return (
+      <div key={t.id} className="bcard__strip">
+        {card}
+        {start}
+        {proof}
+      </div>
+    );
+  };
+
+  // why · when · where for a card; CSS shows it only where the lane is wide enough to carry it
+  const ctxOf = (id: string) => {
+    const row = allTasks.find((r) => r.id === id);
+    return row ? (
+      <div className="bcard__ctx">
+        <ContextLine ctx={row.context} compact ownWhyOnly />
+      </div>
+    ) : null;
+  };
 
   const renderCard = (t: BoardTask) => {
     const tone = KINDS[t.kind];
@@ -230,6 +174,7 @@ export function BoardView() {
               </span>
             )}
           </div>
+          {ctxOf(t.id)}
           {next && (
             <button className="bcard__advance" onClick={(e) => { e.stopPropagation(); moveBoard(t.id, next); }}>
               {ADVANCE_LABEL[t.column]} →
@@ -271,24 +216,19 @@ export function BoardView() {
             <span className="chip chip--neutral">{t.tagLabel}</span>
           )}
         </div>
+        {ctxOf(t.id)}
       </div>
     );
   };
 
   return (
-    <div className="viewbody board">
+    <div className={rootClass}>
       {switcher}
       {/* project header */}
         <header className="board__header">
           <div className="board__head-row">
-            <div>
-              <div className="board__eyebrow-row">
-                <span className="eyebrow">Project</span>
-                <ClientPicker projectId={project.id} clientId={project.clientId} />
-              </div>
-              <h1 className="board__name serif">{project.name}</h1>
-              <p className="board__sub">{project.subtitle}</p>
-            </div>
+            {/* who the project is, what it is for and who it serves live on the
+                Projects page; here the board only carries what it acts on */}
             <div className="board__head-right">
               <div className="board__due">
                 <div className="board__due-label">DUE</div>
@@ -312,7 +252,7 @@ export function BoardView() {
               <div className="board__fill" style={{ width: `${pct}%` }} />
             </div>
             <span>
-              <b>{project.done}</b> of {project.total} done
+              <b>{progress.done}</b> of {progress.total} {progress.unit === 'requirements' ? 'requirements met' : 'done'}
             </span>
             <span className="plan__dot">·</span>
             <span>
@@ -334,7 +274,24 @@ export function BoardView() {
                   {col.aside && <span className="board__col-aside">{col.aside}</span>}
                 </div>
                 <div className="board__col-body">
-                  {tasks.map(renderCard)}
+                  {col.key === 'backlog' && (
+                    <form
+                      className="board__add"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        addProjectAction(project.id, newAction);
+                        setNewAction('');
+                      }}
+                    >
+                      <input className="board__add-input" value={newAction} onChange={(e) => setNewAction(e.target.value)} placeholder="Add an action" aria-label="New action" />
+                      {newAction.trim() && (
+                        <button type="submit" className="board__add-go">
+                          Add
+                        </button>
+                      )}
+                    </form>
+                  )}
+                  {tasks.map((t) => withStrip(t, renderCard(t)))}
                   {col.key === 'focus' && (
                     <div className="bcard bcard--empty">
                       Nothing else in focus.

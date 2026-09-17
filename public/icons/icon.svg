@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- the Cadence mark: the wordmark's terracotta dot on an ink tile -->
+  <rect width="32" height="32" rx="8" fill="#211E18"/>
+  <circle cx="16" cy="16" r="4.8" fill="#C2743D"/>
+</svg>

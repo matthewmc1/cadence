@@ -1,3 +1,4 @@
+@import './fonts.css';
 @import './tokens.css';
 
 *,
@@ -12,6 +13,18 @@ body,
   height: 100%;
 }
 
+/* Cadence is light-only by design: no data-theme, no prefers-color-scheme.
+   Say so explicitly so native controls (selects, date inputs, scrollbars)
+   don't pick up a dark UA theme and read as a different app. */
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%; /* iOS: keep our sizes when rotating */
+  overscroll-behavior: none; /* standalone/PWA: no rubber-band past the shell */
+}
+
 body {
   margin: 0;
   background: var(--canvas);
@@ -22,6 +35,15 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  overflow-x: hidden; /* wide content scrolls inside its own container, never the page */
+}
+
+/* narrow screens share one gutter, like the wide ones share 44px */
+@media (max-width: 860px) {
+  :root {
+    --gutter: 20px;
+    --gutter-top: 22px;
+  }
 }
 
 button {
@@ -61,11 +83,11 @@ a {
   color: var(--ink-label);
 }
 
-/* Focus ring — visible, on-brand, keyboard only */
+/* Focus ring — visible, on-brand, keyboard only. The outline follows the
+   element's own radius (pills stay pills), so no radius is forced here. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 *:focus:not(:focus-visible) {
   outline: none;

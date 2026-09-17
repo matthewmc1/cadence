@@ -1,9 +1,16 @@
-# Local Postgres for Cadence.
+# Cadence — private deployment (app + Postgres) and the local dev database.
+#
+#   docker compose up -d        # everything: builds the image, brings up db + app
+#   docker compose up -d db     # database only — what ./dev.sh does for local dev
 #
 # Data lives in the named volume `cadence_pgdata`, so it PERSISTS across
 # `docker compose down` and machine restarts — it is only deleted by an explicit
-# `docker compose down -v` (see `make db-reset`). This is what makes local data
-# durable instead of living in the wiped-on-restart in-memory store.
+# `docker compose down -v` (see `make db-reset`). Back it up with
+# scripts/backup.sh; rehearse a restore with scripts/restore.sh.
+#
+# Settings come from ./.env (copy .env.example). CADENCE_DB_PASSWORD is
+# required — there is deliberately no default password baked in here; ./dev.sh
+# and the Makefile supply `cadence` for local development only.
 
 services:
   db:
@@ -12,11 +19,16 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: cadence
-      POSTGRES_PASSWORD: cadence
+      POSTGRES_PASSWORD: ${CADENCE_DB_PASSWORD:?set CADENCE_DB_PASSWORD in .env}
       POSTGRES_DB: cadence
     ports:
       # Host port defaults to 55432 to avoid colliding with a local Postgres on 5432.
-      - "${CADENCE_DB_PORT:-55432}:5432"
+      # Bound to loopback: the mapping exists for ./dev.sh, `make test-db` and
+      # psql on the SAME machine, never for the network — the `cadence` role is
+      # the table owner and bypasses RLS, so exposing it would expose every
+      # tenant. For a private host, drop this mapping entirely: only `app`
+      # needs the database.
+      - "127.0.0.1:${CADENCE_DB_PORT:-55432}:5432"
     volumes:
       - cadence_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,5 +37,56 @@ services:
       timeout: 3s
       retries: 20
 
+  app:
+    build: .
+    image: cadence:local
+    container_name: cadence-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Settings are read from ./.env by compose's own interpolation and passed
+    # through explicitly (an unset key arrives empty, which the server treats
+    # as unset). The first three are pinned to the compose topology.
+    environment:
+      CADENCE_ADDR: ":8088"
+      CADENCE_BACKEND: postgres
+      DATABASE_URL: postgres://cadence:${CADENCE_DB_PASSWORD:?set CADENCE_DB_PASSWORD in .env}@db:5432/cadence?sslmode=disable
+      CADENCE_AUTO_MIGRATE: ${CADENCE_AUTO_MIGRATE:-true}
+      CADENCE_OUTBOX_RETENTION_DAYS: ${CADENCE_OUTBOX_RETENTION_DAYS:-7}
+      # web origin + magic links
+      CADENCE_WEB_URL: ${CADENCE_WEB_URL:-http://localhost:8088}
+      CADENCE_WEB_ORIGINS: ${CADENCE_WEB_ORIGINS:-localhost:*,127.0.0.1:*}
+      # auth + safe defaults (see .env.example)
+      CADENCE_COOKIE_SECURE: ${CADENCE_COOKIE_SECURE:-false}
+      CADENCE_SESSION_DAYS: ${CADENCE_SESSION_DAYS:-30}
+      CADENCE_LOGIN_MINUTES: ${CADENCE_LOGIN_MINUTES:-15}
+      CADENCE_DEV_AUTH: ${CADENCE_DEV_AUTH:-}
+      CADENCE_SIGNUP: ${CADENCE_SIGNUP:-invite}
+      CADENCE_ADMIN_EMAILS: ${CADENCE_ADMIN_EMAILS:-}
+      # magic-link email
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      # AI (all local)
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      CADENCE_AI_POLICY: ${CADENCE_AI_POLICY:-local}
+      # Host-side CADENCE_MODEL_DIR (a directory of WebLLM artifacts) is mounted
+      # at /models below; inside the container that is the path to use.
+      CADENCE_MODEL_DIR: ${CADENCE_MODEL_DIR:+/models}
+    ports:
+      - "${CADENCE_PORT:-8088}:8088"
+    volumes:
+      # Self-hosted model weights (optional). Unset ⇒ an empty named volume.
+      - ${CADENCE_MODEL_DIR:-cadence_models}:/models:ro
+    extra_hosts:
+      # Lets OLLAMA_URL=http://host.docker.internal:11434 reach an Ollama on the host (Linux too).
+      - "host.docker.internal:host-gateway"
+
 volumes:
   cadence_pgdata:
+  cadence_models:

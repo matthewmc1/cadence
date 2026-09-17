@@ -1,13 +1,16 @@
 import { lerpHex, clamp } from '../lib/curve';
+import { clock } from '../lib/time';
 
 /**
- * "When focus happens" — completed work by hour and day, rendered from a
+ * "When work gets finished" — completed work by hour and day, rendered from a
  * normalized intensity grid computed from real completions (see computeInsights).
+ * Every other hour is labelled, 24-hour like the rest of the app.
  */
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const HOUR_LABEL: Record<number, string> = { 7: '7a', 9: '9a', 11: '11a', 13: '1p', 15: '3p', 17: '5p', 19: '7p' };
+const LABELLED = new Set([7, 9, 11, 13, 15, 17, 19]);
+const hourLabel = (h: number): string | null => (LABELLED.has(h) ? clock(h) : null);
 
-const CW = 46, CHH = 20, GX = 6, GY = 6, PAD_L = 36, PAD_T = 22;
+const CW = 46, CHH = 20, GX = 6, GY = 6, PAD_L = 44, PAD_T = 22;
 const LO = '#ECE6DA', HI = '#C2743D';
 
 export function Heatmap({ grid, hours }: { grid: number[][]; hours: number[] }) {
@@ -20,7 +23,7 @@ export function Heatmap({ grid, hours }: { grid: number[][]; hours: number[] }) 
       width="100%"
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label="Completed work by hour and day. Densest on weekday late mornings."
+      aria-label="Completed work by hour and day — the darker the cell, the more work finished then."
     >
       {DAYS.map((d, ci) => (
         <text
@@ -37,10 +40,10 @@ export function Heatmap({ grid, hours }: { grid: number[][]; hours: number[] }) 
         </text>
       ))}
       {hours.map((h, ri) =>
-        HOUR_LABEL[h] ? (
+        hourLabel(h) ? (
           <text
             key={`h${ri}`}
-            x={28}
+            x={PAD_L - 8}
             y={PAD_T + ri * (CHH + GY) + CHH / 2 + 4}
             textAnchor="end"
             fontFamily="var(--sans)"
@@ -48,7 +51,7 @@ export function Heatmap({ grid, hours }: { grid: number[][]; hours: number[] }) 
             fontWeight={600}
             fill="#948A77"
           >
-            {HOUR_LABEL[h]}
+            {hourLabel(h)}
           </text>
         ) : null,
       )}
@@ -58,7 +61,7 @@ export function Heatmap({ grid, hours }: { grid: number[][]; hours: number[] }) 
           const fill = it < 0.06 ? '#EFEAE1' : lerpHex(LO, HI, it);
           return (
             <rect key={`c${ri}-${ci}`} x={PAD_L + ci * (CW + GX)} y={PAD_T + ri * (CHH + GY)} width={CW} height={CHH} rx={4} fill={fill}>
-              <title>{`${d} ${HOUR_LABEL[h] ?? h + ':00'} · ${Math.round(it * 100)}% of peak`}</title>
+              <title>{`${d} ${clock(h)} · ${Math.round(it * 100)}% of peak`}</title>
             </rect>
           );
         }),

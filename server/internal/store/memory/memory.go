@@ -22,7 +22,27 @@ type Store struct {
 	clients  map[string]*domain.Client
 	projects map[string]*domain.Project
 	tasks    map[string]*domain.Task
-	broker   *broker
+	// requirements by id (requirements.go); audit rows by tenant, append-only
+	// (audit.go) — only PurgeTenant ever removes from it.
+	requirements map[string]*domain.Requirement
+	audit        map[string][]domain.AuditEntry
+	// lastAuditAt is the most recent `at` handed to an audit row. Appends can
+	// land in the same microsecond in-process (a Postgres round-trip never
+	// does), which would leave the (at, id) paging key to the random bits of
+	// two v7 ids; nudging a tie forward keeps list order = append order.
+	lastAuditAt time.Time
+	// signal surface (signals.go): sources and signals by id, bodies by
+	// signal id (kept apart so a list never copies them), origins by task id
+	// then signal id, outputs by id.
+	sources map[string]*domain.Source
+	signals map[string]*domain.Signal
+	bodies  map[string]*domain.SignalBody
+	origins map[string]map[string]*domain.Origin
+	outputs map[string]*domain.Output
+	broker  *broker
+	// retention sweep (signals.go pruneLoop): closed once by Close
+	stopPrune chan struct{}
+	stopOnce  sync.Once
 
 	// auth
 	accounts    map[string]domain.Account  // by email
@@ -38,18 +58,28 @@ type loginToken struct {
 }
 
 func New() *Store {
-	return &Store{
-		tenants:     make(map[string]domain.Tenant),
-		users:       make(map[string]domain.User),
-		clients:     make(map[string]*domain.Client),
-		projects:    make(map[string]*domain.Project),
-		tasks:       make(map[string]*domain.Task),
-		broker:      newBroker(),
-		accounts:    make(map[string]domain.Account),
-		loginTokens: make(map[string]loginToken),
-		sessions:    make(map[string]domain.Session),
-		apiTokens:   make(map[string]domain.APIToken),
+	s := &Store{
+		tenants:      make(map[string]domain.Tenant),
+		users:        make(map[string]domain.User),
+		clients:      make(map[string]*domain.Client),
+		projects:     make(map[string]*domain.Project),
+		tasks:        make(map[string]*domain.Task),
+		requirements: make(map[string]*domain.Requirement),
+		audit:        make(map[string][]domain.AuditEntry),
+		sources:      make(map[string]*domain.Source),
+		signals:      make(map[string]*domain.Signal),
+		bodies:       make(map[string]*domain.SignalBody),
+		origins:      make(map[string]map[string]*domain.Origin),
+		outputs:      make(map[string]*domain.Output),
+		broker:       newBroker(),
+		accounts:     make(map[string]domain.Account),
+		loginTokens:  make(map[string]loginToken),
+		sessions:     make(map[string]domain.Session),
+		apiTokens:    make(map[string]domain.APIToken),
+		stopPrune:    make(chan struct{}),
 	}
+	go s.pruneLoop()
+	return s
 }
 
 // ---- raw fixture loaders (used by the seed package; emit no events) ----
@@ -118,21 +148,24 @@ func (s *Store) Bootstrap(_ context.Context, tenantID, userID string) (*domain.B
 	}
 	sortProjects(projects)
 
+	requirements := s.selectRequirements(tenantID, store.RequirementFilter{})
+
 	var tasks []domain.Task
 	for _, t := range s.tasks {
 		if t.TenantID == tenantID {
-			tasks = append(tasks, *t)
+			tasks = append(tasks, s.withCounts(*t))
 		}
 	}
 	sortTasks(tasks)
 
 	return &domain.Bootstrap{
-		Tenant:   tenant,
-		User:     user,
-		Clients:  clients,
-		Projects: projects,
-		Tasks:    tasks,
-		ServerAt: time.Now().UTC(),
+		Tenant:       tenant,
+		User:         user,
+		Clients:      clients,
+		Projects:     projects,
+		Requirements: requirements,
+		Tasks:        tasks,
+		ServerAt:     time.Now().UTC(),
 	}, nil
 }
 
@@ -141,19 +174,54 @@ func (s *Store) ListTasks(_ context.Context, tenantID string, f store.TaskFilter
 	defer s.mu.RUnlock()
 	var out []domain.Task
 	for _, t := range s.tasks {
-		if t.TenantID != tenantID {
-			continue
+		if matchTask(t, tenantID, f) {
+			out = append(out, s.withCounts(*t))
 		}
-		if f.Status != nil && t.Status != *f.Status {
-			continue
-		}
-		if f.ProjectID != nil && (t.ProjectID == nil || *t.ProjectID != *f.ProjectID) {
-			continue
-		}
-		out = append(out, *t)
 	}
 	sortTasks(out)
 	return out, nil
+}
+
+// ListTasksPaged is the keyset-paged read: filter, keep rows older than the
+// cursor, sort newest-first, then let store.Paginate trim to the page. Any
+// entity paged later (signals) follows exactly this shape with its own key.
+func (s *Store) ListTasksPaged(_ context.Context, tenantID string, f store.TaskFilter, p store.Page) (store.PageResult[domain.Task], error) {
+	cur, err := store.DecodeCursor(p.Cursor)
+	if err != nil {
+		return store.PageResult[domain.Task]{}, err
+	}
+	limit := p.EffectiveLimit()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var rows []domain.Task
+	for _, t := range s.tasks {
+		if matchTask(t, tenantID, f) && cur.Admits(t.CreatedAt, t.ID) {
+			rows = append(rows, s.withCounts(*t))
+		}
+	}
+	store.SortNewestFirst(rows, store.TaskKey)
+	if len(rows) > limit+1 {
+		rows = rows[:limit+1] // limit+1: Paginate uses the spare row as "has more"
+	}
+	return store.Paginate(rows, limit, store.TaskKey), nil
+}
+
+// matchTask applies the tenant fence and the ListTasks filter to one row.
+func matchTask(t *domain.Task, tenantID string, f store.TaskFilter) bool {
+	if t.TenantID != tenantID {
+		return false
+	}
+	if f.Status != nil && t.Status != *f.Status {
+		return false
+	}
+	if f.Stage != nil && t.Stage != *f.Stage {
+		return false
+	}
+	if f.ProjectID != nil && (t.ProjectID == nil || *t.ProjectID != *f.ProjectID) {
+		return false
+	}
+	return true
 }
 
 func (s *Store) GetTask(_ context.Context, tenantID, id string) (*domain.Task, error) {
@@ -163,7 +231,7 @@ func (s *Store) GetTask(_ context.Context, tenantID, id string) (*domain.Task, e
 	if !ok || t.TenantID != tenantID {
 		return nil, domain.ErrNotFound
 	}
-	cp := *t
+	cp := s.withCounts(*t)
 	return &cp, nil
 }
 
@@ -196,73 +264,15 @@ func (s *Store) ListClients(_ context.Context, tenantID string) ([]domain.Client
 // ---- task writes ----
 
 func (s *Store) CreateTask(_ context.Context, tenantID, actorID string, in domain.CreateTaskInput) (*domain.Task, error) {
-	title := strings.TrimSpace(in.Title)
-	if title == "" {
-		return nil, domain.Invalid("title", "is required")
+	t, err := store.NewTask(tenantID, actorID, in, time.Now().UTC())
+	if err != nil {
+		return nil, err
 	}
-
-	kind, effort := domain.Infer(title)
-	if in.Kind != nil {
-		if !in.Kind.Valid() {
-			return nil, domain.Invalid("kind", "is invalid")
-		}
-		kind = *in.Kind
-	}
-	if in.EffortMinutes != nil {
-		effort = *in.EffortMinutes
-	}
-	status := domain.StatusBacklog
-	if in.Status != nil {
-		if !in.Status.Valid() {
-			return nil, domain.Invalid("status", "is invalid")
-		}
-		status = *in.Status
-	}
-
-	now := time.Now().UTC()
-	t := domain.Task{
-		ID:            domain.NewID(),
-		TenantID:      tenantID,
-		ProjectID:     in.ProjectID,
-		Title:         title,
-		Kind:          kind,
-		Status:        status,
-		EffortMinutes: effort,
-		Note:          deref(in.Note),
-		Reflection:    deref(in.Reflection),
-		Place:         in.Place,
-		ScheduledAt:   in.ScheduledAt,
-		Version:       1,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	if in.Urgent != nil {
-		t.Urgent = *in.Urgent
-	}
-	if in.Important != nil {
-		t.Important = *in.Important
-	}
-	if in.Position != nil {
-		t.Position = *in.Position
-	}
-	if in.Deadline != nil {
-		t.Deadline = in.Deadline
-	}
-	if in.Recurrence != nil {
-		t.Recurrence = *in.Recurrence
-	}
-	t.Links = in.Links
-	t.Subtasks = in.Subtasks
-	t.Assignees = in.Assignees
-	if status == domain.StatusDone {
-		t.DoneAt = &now
-	}
-	t.Normalize()
 
 	s.mu.Lock()
-	if t.ProjectID != nil && !s.hasProject(tenantID, *t.ProjectID) {
+	if err := s.checkTaskRefs(tenantID, &t); err != nil {
 		s.mu.Unlock()
-		return nil, domain.Invalid("projectId", "not found in this workspace")
+		return nil, err
 	}
 	cp := t
 	s.tasks[t.ID] = &cp
@@ -290,17 +300,18 @@ func (s *Store) UpdateTask(_ context.Context, tenantID, actorID, id string, patc
 		s.mu.Unlock()
 		return nil, err
 	}
-	if updated.ProjectID != nil && !s.hasProject(tenantID, *updated.ProjectID) {
+	if err := s.checkTaskRefs(tenantID, &updated); err != nil {
 		s.mu.Unlock()
-		return nil, domain.Invalid("projectId", "not found in this workspace")
+		return nil, err
 	}
 	updated.Version = existing.Version + 1
 	updated.UpdatedAt = now
 	s.tasks[id] = &updated
+	// the stored row never carries the derived counts; what leaves does
+	out := s.withCounts(updated)
 	s.mu.Unlock()
 
-	s.broker.publish(taskEvent(domain.EventTaskUpdated, actorID, &updated))
-	out := updated
+	s.broker.publish(taskEvent(domain.EventTaskUpdated, actorID, &out))
 	return &out, nil
 }
 
@@ -312,11 +323,12 @@ func (s *Store) DeleteTask(_ context.Context, tenantID, actorID, id string) erro
 		return domain.ErrNotFound
 	}
 	delete(s.tasks, id)
+	s.cascadeTaskChildren(id) // origins and outputs go with the work item
 	s.mu.Unlock()
 
 	s.broker.publish(domain.Event{
 		ID: domain.NewID(), Type: domain.EventTaskDeleted, TenantID: tenantID,
-		ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+		ActorID: actorID, EntityType: domain.EntityTask, EntityID: id, At: time.Now().UTC(),
 	})
 	return nil
 }
@@ -331,8 +343,12 @@ func (s *Store) CreateProject(_ context.Context, tenantID, actorID string, in do
 	now := time.Now().UTC()
 	p := domain.Project{
 		ID: domain.NewID(), TenantID: tenantID, ClientID: in.ClientID, Name: name,
-		Subtitle: deref(in.Subtitle), Due: in.Due, Color: orDefault(in.Color, "#C2743D"),
+		Subtitle: deref(in.Subtitle), Outcome: strings.TrimSpace(deref(in.Outcome)), Due: in.Due,
+		Color:   orDefault(in.Color, "#C2743D"),
 		Members: []domain.ProjectMember{}, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CheckTextLen("outcome", p.Outcome); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -385,6 +401,23 @@ func (s *Store) UpdateProject(_ context.Context, tenantID, actorID, id string, p
 	if c, ok := patch["color"].(string); ok {
 		updated.Color = c
 	}
+	if o, ok := patch["outcome"].(string); ok {
+		if err := store.CheckTextLen("outcome", o); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
+		updated.Outcome = strings.TrimSpace(o)
+	}
+	if v, ok := patch["archived"]; ok {
+		if b, _ := v.(bool); b {
+			if updated.ArchivedAt == nil {
+				at := now
+				updated.ArchivedAt = &at
+			}
+		} else {
+			updated.ArchivedAt = nil
+		}
+	}
 	if updated.ClientID != nil && !s.hasClient(tenantID, *updated.ClientID) {
 		s.mu.Unlock()
 		return nil, domain.Invalid("clientId", "not found in this workspace")
@@ -407,6 +440,8 @@ func (s *Store) DeleteProject(_ context.Context, tenantID, actorID, id string) e
 		return domain.ErrNotFound
 	}
 	delete(s.projects, id)
+	s.cascadeRequirements(tenantID, id) // requirements go with their project
+	s.detachSignalsFromProject(tenantID, id, time.Now().UTC())
 	// detach tasks from the deleted project
 	for _, t := range s.tasks {
 		if t.ProjectID != nil && *t.ProjectID == id {
@@ -417,7 +452,7 @@ func (s *Store) DeleteProject(_ context.Context, tenantID, actorID, id string) e
 
 	s.broker.publish(domain.Event{
 		ID: domain.NewID(), Type: domain.EventProjectDeleted, TenantID: tenantID,
-		ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+		ActorID: actorID, EntityType: domain.EntityProject, EntityID: id, At: time.Now().UTC(),
 	})
 	return nil
 }
@@ -443,8 +478,12 @@ func (s *Store) CreateClient(_ context.Context, tenantID, actorID string, in dom
 	now := time.Now().UTC()
 	c := domain.Client{
 		ID: domain.NewID(), TenantID: tenantID, Name: name, Tier: tier, Kind: kind,
-		Color: orDefault(in.Color, "#6E7E91"), ExpectedTouchDays: in.ExpectedTouchDays,
-		Version: 1, CreatedAt: now, UpdatedAt: now,
+		Color: orDefault(in.Color, "#6E7E91"), Standard: strings.TrimSpace(deref(in.Standard)),
+		ExpectedTouchDays: in.ExpectedTouchDays,
+		Version:           1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CheckTextLen("standard", c.Standard); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -489,6 +528,13 @@ func (s *Store) UpdateClient(_ context.Context, tenantID, actorID, id string, pa
 	}
 	if c, ok := patch["color"].(string); ok {
 		updated.Color = c
+	}
+	if st, ok := patch["standard"].(string); ok {
+		if err := store.CheckTextLen("standard", st); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
+		updated.Standard = strings.TrimSpace(st)
 	}
 	if v, ok := patch["expectedTouchDays"]; ok {
 		n, err := touchDays(v)
@@ -537,7 +583,7 @@ func (s *Store) DeleteClient(_ context.Context, tenantID, actorID, id string) er
 
 	s.broker.publish(domain.Event{
 		ID: domain.NewID(), Type: domain.EventClientDeleted, TenantID: tenantID,
-		ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+		ActorID: actorID, EntityType: domain.EntityClient, EntityID: id, At: time.Now().UTC(),
 	})
 	return nil
 }
@@ -551,17 +597,20 @@ func (s *Store) Subscribe(tenantID string) (<-chan domain.Event, func()) {
 func (s *Store) Ping(context.Context) error { return nil }
 
 func (s *Store) Close() error {
+	s.stopOnce.Do(func() { close(s.stopPrune) })
 	s.broker.close()
 	return nil
 }
 
 // ---- helpers ----
 
+// taskEvent / projectEvent / clientEvent build the legacy typed-pointer events.
+// New entity types should use s.emitEntity (events.go) instead.
 func taskEvent(t domain.EventType, actorID string, task *domain.Task) domain.Event {
 	cp := *task
 	return domain.Event{
 		ID: domain.NewID(), Type: t, TenantID: task.TenantID, ActorID: actorID,
-		Task: &cp, EntityID: task.ID, At: time.Now().UTC(),
+		Task: &cp, EntityType: domain.EntityTask, EntityID: task.ID, At: time.Now().UTC(),
 	}
 }
 
@@ -569,7 +618,7 @@ func projectEvent(t domain.EventType, actorID string, p *domain.Project) domain.
 	cp := cloneProject(p)
 	return domain.Event{
 		ID: domain.NewID(), Type: t, TenantID: p.TenantID, ActorID: actorID,
-		Project: &cp, EntityID: p.ID, At: time.Now().UTC(),
+		Project: &cp, EntityType: domain.EntityProject, EntityID: p.ID, At: time.Now().UTC(),
 	}
 }
 
@@ -577,7 +626,7 @@ func clientEvent(t domain.EventType, actorID string, c *domain.Client) domain.Ev
 	cp := *c
 	return domain.Event{
 		ID: domain.NewID(), Type: t, TenantID: c.TenantID, ActorID: actorID,
-		Client: &cp, EntityID: c.ID, At: time.Now().UTC(),
+		Client: &cp, EntityType: domain.EntityClient, EntityID: c.ID, At: time.Now().UTC(),
 	}
 }
 
@@ -599,6 +648,48 @@ func (s *Store) hasProject(tenantID, id string) bool {
 func (s *Store) hasClient(tenantID, id string) bool {
 	c, ok := s.clients[id]
 	return ok && c.TenantID == tenantID
+}
+func (s *Store) hasUser(tenantID, id string) bool {
+	u, ok := s.users[id]
+	return ok && u.TenantID == tenantID
+}
+func (s *Store) hasRequirement(tenantID, id string) bool {
+	r, ok := s.requirements[id]
+	return ok && r.TenantID == tenantID
+}
+
+// checkTaskRefs mirrors the tenant-local FKs on tasks (0001 project, 0013
+// owner / requirement / waiting-on person): every reference must exist in
+// the tenant. Caller holds s.mu. createdBy is attribution with no FK, so it
+// is not checked.
+func (s *Store) checkTaskRefs(tenantID string, t *domain.Task) error {
+	if t.ProjectID != nil && !s.hasProject(tenantID, *t.ProjectID) {
+		return domain.Invalid("projectId", "not found in this workspace")
+	}
+	if t.OwnerID != nil && !s.hasUser(tenantID, *t.OwnerID) {
+		return domain.Invalid("ownerId", "not found in this workspace")
+	}
+	if t.RequirementID != nil && !s.hasRequirement(tenantID, *t.RequirementID) {
+		return domain.Invalid("requirementId", "not found in this workspace")
+	}
+	if t.WaitingOnPersonID != nil && !s.hasUser(tenantID, *t.WaitingOnPersonID) {
+		return domain.Invalid("waitingOnPersonId", "not found in this workspace")
+	}
+	return nil
+}
+
+// detachTasksFromRequirement mirrors the postgres ON DELETE SET NULL
+// (requirement_id) from requirements: the tasks stay, pointing at nothing.
+// updated_at is bumped like the trigger would; version is left as-is and no
+// task.updated event fires (parity with postgres, where the FK does it).
+// Caller holds s.mu.
+func (s *Store) detachTasksFromRequirement(tenantID, requirementID string, now time.Time) {
+	for _, t := range s.tasks {
+		if t.TenantID == tenantID && t.RequirementID != nil && *t.RequirementID == requirementID {
+			t.RequirementID = nil
+			t.UpdatedAt = now
+		}
+	}
 }
 
 func sortTasks(ts []domain.Task) {

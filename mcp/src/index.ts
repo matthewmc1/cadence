@@ -149,7 +149,12 @@ function renderProjectStatus(p: Project, boot: Bootstrap): string {
   const s = projectStats(p, boot.tasks);
   const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
   const out = [`# ${p.name}`];
-  if (p.subtitle) out.push(`**Outcome:** ${p.subtitle}`);
+  const outcome = p.outcome?.trim() || p.subtitle;
+  if (outcome) out.push(`**Outcome (why):** ${outcome}`);
+  else out.push(`**Outcome (why):** _none set — this project's tasks have no stated why_`);
+  const area = p.clientId ? boot.clients?.find((c) => c.id === p.clientId) : undefined;
+  if (area) out.push(`**Area:** ${area.name}${area.standard ? ` — standard: ${area.standard}` : ''}`);
+  if (p.archivedAt) out.push(`**Archived:** ${p.archivedAt.slice(0, 10)} — not active work`);
   out.push(`**Progress:** ${s.done}/${s.total} done (${pct}%)${p.due ? ` · target ${p.due}` : ''}`);
   const byStatus: Record<Status, Task[]> = { backlog: [], scheduled: [], focus: [], done: [] };
   for (const t of s.items) byStatus[t.status].push(t);

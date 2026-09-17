@@ -19,13 +19,16 @@
   border-bottom: 1px solid var(--line);
   position: relative;
   z-index: 20;
+  padding-top: env(safe-area-inset-top); /* standalone on a notched phone: the bar wears the status-bar inset */
 }
 .appbar__inner {
   display: flex;
   align-items: center;
   gap: 32px;
   height: 66px;
-  padding: 0 36px;
+  /* the bar shares the page gutter, and on a notched phone (viewport-fit=cover)
+     stays clear of the rounded corners */
+  padding: 0 max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
   max-width: 1680px;
   margin: 0 auto;
 }
@@ -50,6 +53,9 @@
 }
 .tab {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: none;
   background: transparent;
   color: var(--ink-4);
@@ -58,6 +64,28 @@
   padding: 8px 14px;
   border-radius: 10px;
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+/* icons only earn their place on narrow screens (see the 900px query) */
+.tab__icon {
+  display: none;
+  line-height: 0;
+}
+/* inbox count: a small ink pill, terracotta once the tab is current */
+.tab__badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  transition: background var(--dur) var(--ease);
+}
+.tab--active .tab__badge {
+  background: var(--accent);
 }
 .tab:hover {
   color: var(--ink);
@@ -152,7 +180,7 @@
   box-shadow: 0 18px 44px -18px rgba(33, 30, 24, 0.45);
   padding: 6px;
   z-index: 50;
-  animation: toast-in 0.2s var(--ease);
+  animation: toast-in var(--dur-fast) var(--ease);
 }
 .appbar__menu-id {
   padding: 10px 12px 12px;
@@ -412,17 +440,19 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 26px;
+  bottom: calc(26px + env(safe-area-inset-bottom));
   display: flex;
   justify-content: center;
   pointer-events: none;
   z-index: 30;
+  padding: 0 var(--gutter);
 }
 .toast {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  max-width: 100%;
   background: var(--ink);
   color: var(--surface);
   font-size: 13.5px;
@@ -430,10 +460,28 @@
   padding: 12px 20px;
   border-radius: var(--r-pill);
   box-shadow: 0 18px 44px -18px rgba(33, 30, 24, 0.7);
-  animation: toast-in 0.34s var(--ease);
+  animation: toast-in var(--dur) var(--ease);
 }
 .toast__spark {
   color: var(--accent-3);
+}
+/* the reversible toast's one control: the same way back as ⌘Z */
+.toast__undo {
+  margin-left: 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--surface);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: var(--r-pill);
+  padding: 4px 11px;
+  transition: background var(--dur) var(--ease);
+}
+.toast__undo:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.toast__undo:focus-visible {
+  outline-color: var(--surface);
 }
 @keyframes toast-in {
   from {
@@ -465,25 +513,99 @@
 }
 
 /* --------------------------------------------------------------- responsive */
-@media (max-width: 860px) {
+/* under 900px the four tabs stay put — icon + short label, tighter — and the
+   clock steps aside to make room */
+@media (max-width: 900px) {
   .appbar__inner {
-    padding: 0 18px;
-    gap: 16px;
-    height: 60px;
+    gap: 18px;
   }
   .appbar__clock {
     display: none;
   }
+  .appbar__nav {
+    gap: 2px;
+  }
   .appbar__nav .tab {
-    padding: 8px 10px;
-    font-size: 13px;
+    gap: 5px;
+    padding: 8px 9px;
+    font-size: 12.5px;
+  }
+  .appbar__nav .tab--active::after {
+    left: 9px;
+    right: 9px;
+  }
+  .tab__icon {
+    display: inline-flex;
   }
 }
+@media (max-width: 860px) {
+  .appbar__inner {
+    gap: 14px;
+    height: 60px;
+  }
+  /* the toast sits above the inbox's bottom sheet and wraps rather than clips */
+  .toast {
+    white-space: normal;
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+    border-radius: var(--r-lg);
+    padding: 12px 16px;
+  }
+  .toast__undo {
+    min-height: 36px;
+    padding: 6px 14px;
+  }
+}
+/* 390px: the wordmark goes, "+ New" becomes its own glyph, tabs keep icon + label */
 @media (max-width: 560px) {
+  .appbar__inner {
+    gap: 10px;
+  }
+  .appbar__new {
+    padding: 9px 12px;
+  }
+  .appbar__new span {
+    font-size: 18px;
+  }
   .appbar__new span + * {
     display: none;
   }
   .appbar__brand {
     display: none;
+  }
+  .appbar__right {
+    gap: 10px;
+  }
+  .appbar__live {
+    display: none; /* the tab bar needs the width; "offline" still surfaces in the error splash */
+  }
+  .appbar__nav {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: space-between;
+  }
+  .appbar__nav .tab {
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 4px;
+    font-size: 10.5px;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  .appbar__nav .tab--active::after {
+    left: 8px;
+    right: 8px;
+    bottom: 0;
+  }
+  .tab__badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    line-height: 16px;
+    font-size: 9.5px;
   }
 }

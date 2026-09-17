@@ -4,7 +4,7 @@
 export interface NowInfo {
   dayLabel: string; // "Thursday, 27 June"
   navLabel: string;
-  time: string; // "9:41"
+  time: string; // "09:41" — 24-hour, like every other time the app renders
   hour: number; // decimal, e.g. 9.68
   weekday: number; // Mon=0 .. Sun=6
 }
@@ -13,13 +13,29 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+/**
+ * The app's one clock label, from a decimal local hour: 14.5 → "14:30".
+ * 24-hour throughout — the app bar, Plan's slots, Work's schedule column and
+ * every toast read the same way, so "2:00" can never mean either two o'clock.
+ */
+export function clock(hour: number): string {
+  let h = Math.floor(hour);
+  let m = Math.round((hour - h) * 60);
+  if (m === 60) {
+    // a rounded 59.7 minutes rolls into the next hour rather than printing ":60"
+    m = 0;
+    h += 1;
+  }
+  return `${String(((h % 24) + 24) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 export function computeNow(d: Date = new Date()): NowInfo {
   const h = d.getHours();
   const m = d.getMinutes();
   return {
     dayLabel: `${WEEKDAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`,
     navLabel: 'Home',
-    time: `${h}:${m.toString().padStart(2, '0')}`,
+    time: clock(h + m / 60),
     hour: h + m / 60,
     weekday: (d.getDay() + 6) % 7,
   };
@@ -89,6 +105,15 @@ export function combine(dateStr: string, hour: number): string {
 
 export function monthLabel(d: Date): string {
   return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/**
+ * Tomorrow at 09:00 in the viewer's local zone — the one-key snooze target.
+ * Always the next calendar day, even at 08:59, so "snooze" never means "in a
+ * minute"; alternatives sit behind a held modifier in the Inbox.
+ */
+export function tomorrow9am(from: Date = new Date()): Date {
+  return new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1, 9, 0, 0, 0);
 }
 
 /**

@@ -80,4 +80,9 @@
   /* — motion — */
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --dur:  0.28s;
+  --dur-fast: 0.18s; /* strips, toasts, menus: things that appear under the cursor */
+
+  /* — layout — */
+  --gutter: 44px;     /* page side gutter; every view shares it (20px under 860px, see global.css) */
+  --gutter-top: 30px; /* space between the app bar and a view's eyebrow */
 }

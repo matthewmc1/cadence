@@ -4,6 +4,13 @@ node_modules/
 # ---- web build output ----
 dist/
 *.tsbuildinfo
+# the embedded-SPA build dir stays tracked as an empty placeholder (go:embed)
+!/server/internal/web/dist/
+/server/internal/web/dist/*
+!/server/internal/web/dist/.gitkeep
+
+# ---- database backups (scripts/backup.sh) ----
+/backups/
 
 # ---- Go build artifacts ----
 /server/cadence-server

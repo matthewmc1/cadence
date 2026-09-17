@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useApp, useActions } from '../state/store';
 
 export function LoginView() {
-  const { linkSent, devLink } = useApp();
+  const { linkSent, devLink, linkNote } = useApp();
   const { requestMagicLink } = useActions();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,18 +32,31 @@ export function LoginView() {
             <p className="login__sub">
               We sent a magic link to <strong>{linkSent}</strong>. Click it to sign in — no password needed.
             </p>
+            {linkNote && (
+              <p className="login__note" role="status">
+                {linkNote}
+              </p>
+            )}
             {devLink && (
               <a className="login__devlink" href={devLink}>
                 Open magic link →
               </a>
             )}
-            <button className="login__again" onClick={() => requestMagicLink(linkSent)}>
-              Resend
+            <button
+              className="login__again"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                await requestMagicLink(linkSent);
+                setBusy(false);
+              }}
+            >
+              {busy ? 'Sending…' : 'Resend'}
             </button>
           </div>
         ) : (
           <form className="login__form" onSubmit={submit}>
-            <p className="login__lead serif">Sign in to arrange your day.</p>
+            <p className="login__lead serif">Sign in to your team's work.</p>
             <p className="login__sub">Enter your email and we'll send you a magic link.</p>
             <input
               type="email"
@@ -62,7 +75,7 @@ export function LoginView() {
           </form>
         )}
       </div>
-      <p className="login__foot serif">An energy-aware way to plan your work.</p>
+      <p className="login__foot serif">A private workspace where the team's work gets done.</p>
     </div>
   );
 }

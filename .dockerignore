@@ -1,0 +1,15 @@
+# Keep the image build context small and secret-free.
+node_modules
+dist
+server/bin
+server/internal/web/dist
+backups
+.git
+.env
+.env.*
+!.env.example
+.claude
+.playwright-mcp
+*.tsbuildinfo
+*.png
+*.log

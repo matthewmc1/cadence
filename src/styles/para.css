@@ -1,0 +1,1347 @@
+/* ============================================================
+   Projects — the PARA page. A rail (Projects · Areas · Resources ·
+   Archive) and one pane. Same paper, ink and radii as Work.
+   ============================================================ */
+
+.para {
+  padding: var(--gutter-top) var(--gutter) 44px;
+}
+.para__head {
+  margin-bottom: 20px;
+}
+.para__title {
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 2px 0 0;
+}
+.para__layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+/* ---- rail ---- */
+.para__rail {
+  display: grid;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+}
+.para__railhead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+}
+.para__railhead:first-child {
+  margin-top: 0;
+}
+.para__letter {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--fill);
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.para__railname {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.para__railhint {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-4);
+}
+.para__n {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-4);
+  margin-left: 4px;
+}
+.para__add {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.para__add:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+.para__list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.para__list--links {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.para__item,
+.para__link {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  padding: 8px 11px;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.para__link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.para__link .para__n {
+  margin-left: auto;
+}
+.para__link.has-some .para__n {
+  color: var(--accent-deep);
+}
+.para__item:hover,
+.para__link:hover {
+  background: var(--paper);
+  border-color: var(--line-2);
+}
+.para__item.is-on,
+.para__link.is-on {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-card);
+}
+.para__item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.para__item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.para__item-sub {
+  padding-left: 15px;
+}
+.para__item-kind {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--ink-4);
+}
+.para__item-due {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-4);
+}
+.para__item-due.is-late {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+.para__flag {
+  flex: none;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--fill-warm);
+  color: var(--accent-deep);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.para__track {
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+.para__track--lg {
+  height: 6px;
+  max-width: 260px;
+}
+.para__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sage);
+  transition: width var(--dur) var(--ease);
+}
+.para__empty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--ink-4);
+  border: 1px dashed var(--line-dash);
+  border-radius: var(--r-sm);
+  list-style: none;
+}
+
+/* ---- inline creators ---- */
+.para__new {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+}
+.para__new-row {
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+.para__new-row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.para__new-row--end {
+  justify-content: flex-end;
+}
+.para__new-row--end > * {
+  flex: none;
+}
+.para__input,
+.para__field,
+.para__textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface-rail);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  padding: 7px 10px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.para__textarea,
+textarea.para__input {
+  resize: vertical;
+  line-height: 1.45;
+}
+.para__input:focus,
+.para__field:focus,
+.para__textarea:focus {
+  border-color: var(--accent);
+  background: var(--paper);
+  outline: none;
+}
+.para__field.is-late {
+  color: var(--accent-deep);
+  border-color: var(--accent-3);
+}
+.para__field--num {
+  width: 72px;
+}
+.para__go {
+  flex: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: var(--r-pill);
+  padding: 6px 15px;
+  cursor: pointer;
+}
+.para__go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.para__ghost {
+  flex: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  padding: 5px 13px;
+  cursor: pointer;
+}
+.para__ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+/* ---- pane ---- */
+.para__main {
+  min-width: 0;
+}
+.para__pane {
+  display: grid;
+  gap: 18px;
+  padding: 24px 26px 22px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.para__panehead {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.para__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  padding: 2px 6px;
+  margin-left: -6px;
+}
+input.para__name:hover {
+  border-color: var(--line-2);
+}
+input.para__name:focus {
+  border-color: var(--accent);
+  outline: none;
+  background: var(--surface-rail);
+}
+.para__tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--fill);
+  border-radius: var(--r-pill);
+  padding: 3px 10px;
+}
+.para__lede {
+  margin: -6px 0 0;
+  max-width: 64ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+.para__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+.para__fact {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  min-width: 0;
+}
+.para__fact--wide {
+  grid-column: 1 / -1;
+}
+.para__factkey {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+.para__fact-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.para__gaps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 11px 14px 11px 30px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+  border-radius: var(--r-sm);
+}
+.para__progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.para__progress-note {
+  color: var(--accent-deep);
+}
+.para__health {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.para__health.is-late {
+  color: var(--accent-deep);
+}
+
+/* Actions | Board — the same pressed pair as the Inbox's Bundled | Flat */
+.para__modes {
+  justify-self: start;
+  display: inline-flex;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 3px;
+}
+.para__mode {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 5px 15px;
+  cursor: pointer;
+}
+.para__mode.is-on {
+  color: var(--ink);
+  background: var(--fill);
+}
+.para__board {
+  min-width: 0;
+  overflow-x: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-3);
+}
+
+.para__sec {
+  display: grid;
+  gap: 9px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-3);
+}
+.para__sechead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.para__sechead .dot {
+  align-self: center;
+}
+.para__secnote {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--ink-4);
+}
+.para__reqs,
+.para__actions,
+.para__resources,
+.para__cards {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.para__req {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.para__req-mark {
+  flex: none;
+  width: 14px;
+  color: var(--ink-4);
+}
+.para__req--met .para__req-mark {
+  color: var(--sage);
+}
+.para__req--met .para__req-title,
+.para__req--dropped .para__req-title {
+  color: var(--ink-4);
+}
+.para__req--dropped .para__req-title {
+  text-decoration: line-through;
+}
+.para__req-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.para__req-n {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-4);
+}
+
+.para__action {
+  display: grid;
+  gap: 5px;
+  padding: 10px 13px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  min-width: 0;
+}
+.para__action:hover {
+  border-color: var(--line-strong);
+}
+.para__action > .ctx {
+  padding-left: 33px;
+}
+.para__action-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.para__action-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.para__action-title:hover {
+  color: var(--accent-deep);
+}
+.para__action-title.is-done {
+  color: var(--ink-4);
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-strike);
+}
+.para__actions--done .para__action {
+  padding: 7px 13px;
+  background: var(--sunken);
+}
+.para__chip {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--fill);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+}
+.para__chip--urgent {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+.para__addaction {
+  display: flex;
+  gap: 8px;
+}
+.para__disclose {
+  justify-self: start;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.para__card {
+  width: 100%;
+  display: grid;
+  gap: 7px;
+  padding: 11px 13px;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.para__card:hover {
+  border-color: var(--line-strong);
+}
+.para__card-outcome {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.para__resource {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 13px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+}
+.para__resource-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+  color: var(--ink);
+  text-decoration: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+a.para__resource-link {
+  color: var(--accent-deep);
+}
+a.para__resource-link:hover {
+  text-decoration: underline;
+}
+.para__resource-from {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-4);
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+}
+button.para__resource-from {
+  cursor: pointer;
+}
+button.para__resource-from:hover {
+  color: var(--accent-deep);
+}
+
+.para__panefoot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-3);
+}
+
+.para__blank {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  max-width: 52ch;
+  padding: 34px 30px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  border: 1px dashed var(--line-dash);
+  border-radius: var(--r-lg);
+}
+.para__blank p {
+  margin: 0;
+}
+.para__blank-lead {
+  font-size: 20px;
+  color: var(--ink);
+}
+
+@media (max-width: 860px) {
+  .para {
+    padding: 22px 20px 36px;
+  }
+  .para__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .para__rail {
+    position: static;
+  }
+  .para__pane {
+    padding: 18px 16px;
+  }
+  .para__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .para__action > .ctx {
+    padding-left: 0;
+  }
+}
+
+/* the pane already states the project's date and progress; the board keeps only what it acts on */
+.para__board .board__due,
+.para__board .board__progress {
+  display: none;
+}
+
+/* ============================================================
+   Project workbench — a summary card, then the board.
+
+   On a desktop the page is fitted to the screen: the rail and
+   each lane scroll on their own, so the summary and the lane
+   heads never leave view. Wider screens give the width to the
+   lanes (the 1680px page cap is lifted for this view); narrow or
+   short screens fall back to one ordinary scrolling page.
+   ============================================================ */
+.para__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.stage[data-view='projects'] .stage__inner {
+  max-width: 2200px;
+}
+
+.para {
+  display: flex;
+  flex-direction: column;
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+.para__layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 24px;
+  align-items: stretch;
+}
+.para__rail {
+  position: static;
+  align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 4px 2px 2px; /* room for the selected item's shadow and focus ring */
+}
+.para__main {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.para__project {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.para__project.is-board {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- summary card ---- */
+.para__summary {
+  flex: none;
+  display: grid;
+  gap: 14px;
+  padding: 18px 22px 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.para__summary-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 32px;
+  align-items: start;
+}
+.para__summary-id {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+/* the outcome reads as the sentence under the title, not as a form field */
+.para__outcome {
+  field-sizing: content;
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 78ch;
+  min-height: 1.5em;
+  margin: 0 0 0 15px;
+  padding: 3px 6px;
+  font-size: 16px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  resize: none;
+}
+.para__outcome::placeholder {
+  color: var(--accent-deep);
+  opacity: 0.85;
+}
+.para__outcome:hover {
+  border-color: var(--line-2);
+}
+.para__outcome:focus {
+  font-style: normal;
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--surface-rail);
+  outline: none;
+}
+.para__stats {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 10px 22px;
+  align-items: start;
+}
+.para__stat {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.para__statkey {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.para__statlink {
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent-deep);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.para__statlink:hover {
+  text-decoration: underline;
+}
+.para__stat .para__field {
+  width: auto;
+  min-width: 140px;
+}
+.para__statval {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 33px; /* sits on the same line as the fields beside it */
+}
+.para__statval--text {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.para__statnum {
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1;
+  color: var(--ink);
+}
+.para__statof {
+  font-size: 14px;
+  color: var(--ink-4);
+}
+.para__stat .para__track--lg {
+  width: 90px;
+  flex: none;
+}
+.para__summary .para__gaps {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.para__summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-3);
+}
+.para__summary-bar .para__addaction {
+  flex: 1 1 320px;
+  max-width: 720px;
+}
+.para__summary-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ---- the board: four lanes that fill what is left of the screen ---- */
+.para__board {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding-top: 0;
+  border-top: none;
+  overflow: visible;
+}
+.para__board .board {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.para__board .board__header {
+  display: none; /* its date, progress and scheduling all sit in the summary card */
+}
+.para__board .board__cols {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  gap: 14px;
+  padding: 0 0 4px;
+}
+.para__board .board__col {
+  flex: 1 1 0;
+  min-width: 200px; /* four lanes still fit a 1280px laptop beside the rail */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px 10px;
+  background: var(--surface-rail);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.para__board .board__col-head {
+  flex: none;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+.para__board .board__col-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 2px 6px; /* keeps a card's hover border inside the scroller */
+}
+
+/* ---- the list, as the alternative to the board ---- */
+.para__listcard {
+  display: grid;
+  gap: 18px;
+  padding: 20px 22px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.para__listcard > .para__sec:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+/* ---- wider screens: the room goes to the lanes and the rail ---- */
+@media (min-width: 1500px) {
+  .para__layout {
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 30px;
+  }
+  .para__board .board__cols {
+    gap: 18px;
+  }
+  .para__board .board__col {
+    padding: 14px 12px 12px;
+  }
+  .para__stats {
+    gap: 10px 30px;
+  }
+}
+@media (min-width: 1900px) {
+  .para__layout {
+    grid-template-columns: 310px minmax(0, 1fr);
+  }
+  .para__name {
+    font-size: 26px;
+  }
+  .para__outcome {
+    font-size: 17px;
+  }
+}
+/* mid widths: the stats drop under the title as one row */
+@media (max-width: 1320px) {
+  .para__summary-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .para__stats {
+    grid-template-columns: repeat(4, minmax(0, auto));
+    justify-content: start;
+  }
+}
+
+/* ---- narrow or short screens: one ordinary scrolling page ---- */
+@media (max-width: 860px), (max-height: 640px) {
+  .para {
+    display: block;
+  }
+  .para__layout {
+    grid-template-rows: none;
+    align-items: start;
+  }
+  .para__rail,
+  .para__main {
+    overflow: visible;
+  }
+  .para__project.is-board {
+    flex: none;
+  }
+  .para__board .board__cols {
+    min-height: 60vh;
+  }
+  .para__board .board__col-body {
+    overflow-y: visible;
+  }
+}
+@media (max-width: 860px) {
+  .para__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .para__summary {
+    padding: 16px;
+  }
+  .para__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .para__stat .para__field {
+    width: 100%;
+    min-width: 0;
+  }
+  .para__outcome {
+    margin-left: 0;
+  }
+  .para__summary-tools {
+    margin-left: 0;
+  }
+  .para__board .board__col {
+    flex: 0 0 min(280px, 82vw);
+    scroll-snap-align: start;
+  }
+  .para__listcard {
+    padding: 16px;
+  }
+}
+.para__note {
+  margin: -4px 0 0 21px;
+  font-size: 12.5px;
+  color: var(--accent-deep);
+}
+@media (max-width: 860px) {
+  .para__note {
+    margin-left: 0;
+  }
+}
+
+/* Each lane is its own container: once one is wide enough (a big screen, or
+   few lanes' worth of room) its cards carry their why · when · where. */
+.para__board .board__col {
+  container-type: inline-size;
+}
+@container (min-width: 360px) {
+  .para__board .bcard__ctx {
+    display: block;
+  }
+}
+/* the top bar lines up with the wider page on this view */
+.app:has(.stage[data-view='projects']) .appbar__inner {
+  max-width: 2200px;
+}
+
+/* ============================================================
+   UX pass — the summary is one compact header (details on
+   demand), the rail is a drawer below 1280px, and sizes flow
+   with the viewport instead of stepping at a few breakpoints.
+   ============================================================ */
+.para {
+  position: relative;
+  /* one fluid pixel: 1px at a 1280px window, easing up to 1.18px on a very wide one */
+  --u: clamp(1px, 0.82px + 0.014vw, 1.18px);
+  padding-top: calc(16 * var(--u));
+  padding-bottom: calc(16 * var(--u));
+}
+.para__layout {
+  grid-template-columns: clamp(232px, 15vw, 320px) minmax(0, 1fr);
+  gap: clamp(18px, 1.6vw, 32px);
+}
+.para__project {
+  gap: clamp(10px, 1vw, 18px);
+}
+
+/* ---- compact summary ---- */
+.para__summary {
+  gap: 4px;
+  padding: calc(12 * var(--u)) calc(18 * var(--u));
+}
+.para__sumrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.para__sumrow .para__name {
+  flex: 1 1 220px;
+  font-size: calc(21 * var(--u));
+}
+.para__glance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.para__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--fill);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+button.para__pill {
+  cursor: pointer;
+}
+button.para__pill:hover {
+  border-color: var(--line-strong);
+}
+.para__pill.is-late {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+.para__pill.is-missing {
+  color: var(--accent-deep);
+  background: transparent;
+  border: 1px dashed var(--accent-3);
+}
+.para__pill--plain {
+  background: transparent;
+  padding-left: 4px;
+}
+.para__pill .para__track--lg {
+  width: clamp(48px, 5vw, 96px);
+  flex: none;
+}
+.para__summary-tools {
+  margin-left: 0;
+}
+.para__outcome {
+  margin-left: 16px;
+  font-size: calc(15 * var(--u));
+  /* closed, the why is one line; it opens to its full length while being edited */
+  max-height: 1.5em;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.para__summary.is-open .para__outcome,
+.para__outcome:focus {
+  max-height: none;
+  white-space: pre-wrap;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.para__details {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-3);
+}
+.para__details .para__stats {
+  grid-template-columns: repeat(auto-fit, minmax(150px, max-content));
+  justify-content: start;
+  align-items: end;
+}
+.para__stat--tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 33px;
+}
+
+/* ---- rail button + drawer ---- */
+.para__railbtn {
+  display: none;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--ink-2);
+  background: var(--fill);
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+}
+.para__railbtn:hover {
+  border-color: var(--line-strong);
+}
+.para__scrim {
+  display: none;
+}
+@media (max-width: 1279px) {
+  .para__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .para__railbtn {
+    display: inline-grid;
+  }
+  .para__rail {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    top: 10px;
+    bottom: 10px;
+    left: max(12px, calc(var(--gutter) - 12px));
+    width: min(320px, calc(100vw - 48px));
+    padding: 16px 14px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-raise);
+  }
+  .para.is-rail-open .para__rail {
+    display: grid;
+  }
+  .para.is-rail-open .para__scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 29;
+    background: rgba(33, 30, 24, 0.18);
+  }
+}
+/* with no project open there is no header to carry the button: show the rail in place */
+@media (max-width: 1279px) {
+  .para__layout:has(.para__blank) .para__rail {
+    display: grid;
+    position: static;
+    width: auto;
+    box-shadow: none;
+    border: none;
+    padding: 2px;
+  }
+}
+
+/* ---- lanes: widths and card type flow with the window ---- */
+.para__board .board__cols {
+  gap: clamp(10px, 1vw, 20px);
+}
+.para__board .board__col {
+  min-width: clamp(190px, 17vw, 240px);
+  padding: calc(10 * var(--u)) calc(9 * var(--u));
+}
+.para__board .bcard {
+  padding: calc(11 * var(--u)) calc(13 * var(--u));
+}
+.para__board .bcard__title {
+  font-size: calc(13.5 * var(--u));
+  line-height: 1.35;
+}
+.para__board .bcard__title--strong {
+  font-size: calc(15 * var(--u));
+}
+.para__board .board__col-title {
+  font-size: calc(13 * var(--u));
+}
+
+/* short windows that still fit the layout: tighten, don't scroll the page */
+@media (min-width: 861px) and (max-height: 760px) {
+  .para {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .para__summary {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+  .para__board .board__col-head {
+    margin-bottom: 6px;
+  }
+}
+/* the page-scroll fallback is for phones and truly short windows only */
+@media (min-width: 861px) and (min-height: 521px) and (max-height: 640px) {
+  .para {
+    display: flex;
+  }
+  .para__layout {
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .para__main {
+    overflow-y: auto;
+  }
+  .para__project.is-board {
+    flex: 1 1 auto;
+  }
+  .para__board .board__cols {
+    min-height: 0;
+  }
+  .para__board .board__col-body {
+    overflow-y: auto;
+  }
+}
+@media (max-width: 860px) {
+  .para__layout {
+    gap: 14px;
+  }
+  .para__outcome {
+    margin-left: 0;
+  }
+  .para__sumrow .para__name {
+    flex-basis: 60%;
+  }
+}

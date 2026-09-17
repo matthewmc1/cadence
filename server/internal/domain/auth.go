@@ -82,10 +82,27 @@ func NormalizeEmail(email string) string {
 }
 
 // ValidEmail is a permissive shape check (real validation is the magic link).
+// Exactly one '@' is required: the signup policy reads the domain off the
+// same split (EmailDomain), so an address like `a@evil.com@example.com` can
+// never pass here as one thing and be policed as another.
 func ValidEmail(email string) bool {
+	if strings.Count(email, "@") != 1 {
+		return false
+	}
 	at := strings.IndexByte(email, '@')
 	if at <= 0 || at == len(email)-1 {
 		return false
 	}
 	return strings.IndexByte(email[at+1:], '.') > 0 && !strings.ContainsAny(email, " \t\n")
+}
+
+// EmailDomain is the part after the '@' of a ValidEmail address ("" when the
+// address has no '@'). Every policy that keys on the domain must use this so
+// it parses the address exactly as ValidEmail did.
+func EmailDomain(email string) string {
+	at := strings.IndexByte(email, '@')
+	if at < 0 {
+		return ""
+	}
+	return email[at+1:]
 }

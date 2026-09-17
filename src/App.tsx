@@ -6,11 +6,12 @@ import { Toast } from './components/Toast';
 import { TaskEditor } from './components/TaskEditor';
 import { TokensModal } from './components/TokensModal';
 import { QuickCapture } from './components/QuickCapture';
+import { ProofDock } from './components/ProofStrip';
 import { LoginView } from './views/LoginView';
-import { TodayView } from './views/TodayView';
 import { InsightsView } from './views/InsightsView';
-import { PlanView } from './views/PlanView';
-import { BoardView } from './views/BoardView';
+import { WorkView } from './views/WorkView';
+import { InboxView } from './views/InboxView';
+import { ProjectsView } from './views/ProjectsView';
 
 function Stage() {
   const { view, status, error, toast, highlightTaskId } = useApp();
@@ -49,12 +50,17 @@ function Stage() {
       )}
       {status === 'ready' && (
         <div className="stage__inner" key={view}>
-          {view === 'today' && <TodayView />}
+          {/* four tabs: today and the "when" live inside Work, Board is a mode of it;
+              Projects is the PARA page (projects · areas · resources · archive).
+              Plan is parked (src/views/PlanView.tsx) — unrouted, not deleted. */}
+          {view === 'inbox' && <InboxView />}
+          {view === 'work' && <WorkView />}
+          {view === 'projects' && <ProjectsView />}
           {view === 'insights' && <InsightsView />}
-          {view === 'plan' && <PlanView />}
-          {view === 'board' && <BoardView />}
         </div>
       )}
+      {/* a proof / start strip whose item is on no surface docks here, under the toast */}
+      <ProofDock />
       <Toast />
     </main>
   );

@@ -2,16 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23211E18'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23C2743D'/%3E%3C/svg%3E" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#E9E6DE" />
-    <meta name="description" content="Cadence — an energy-aware task manager that arranges your work around how your day actually flows." />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Hanken+Grotesk:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- viewport-fit=cover: the shell paints under a notch and pads itself with env(safe-area-inset-*) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- --surface: the app bar's ground, so a standalone status bar matches it -->
+    <meta name="theme-color" content="#F4F1EA" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="Cadence — a private work hub. What comes in becomes work with its context, and gets finished with proof." />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Cadence" />
+    <!-- Fonts are self-hosted (src/styles/fonts.css) — no third-party requests. -->
     <title>Cadence</title>
   </head>
   <body>

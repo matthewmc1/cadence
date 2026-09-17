@@ -1,11 +1,16 @@
 /**
  * Generation backend with two interchangeable engines (pattern from ~/loam):
  *  - WebLLM  — fully in-browser via WebGPU (Gemma 2 2B / Gemma 3 1B). Primary.
- *  - Ollama  — local server (Gemma 3 4B, Qwen 2.5 7B, …). Fallback.
+ *    Weights + wasm come from the Cadence server (/models/) when it hosts them,
+ *    otherwise from WebLLM's upstream CDN (HuggingFace / GitHub) on first use.
+ *  - Ollama  — via the server's AI gateway (/api/v1/ai/*). The browser never
+ *    talks to Ollama itself; the server forwards, applies policy, logs egress.
  *
  * Both are loaded lazily, only when the user runs the scheduler.
  */
-import { OLLAMA_URL, type LlmModelOption } from './config';
+import type { AppConfig } from '@mlc-ai/web-llm';
+import { apiBase, ApiError } from '../api/client';
+import type { LlmModelOption } from './config';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -14,49 +19,76 @@ export interface ChatMessage {
 
 type ProgressFn = (text: string, ratio?: number) => void;
 
+/* ------------------------------ AI gateway ------------------------------ */
+
+/** GET /api/v1/ai/status — what this deployment offers. */
+export interface AiStatus {
+  ollama: { configured: boolean; reachable: boolean; models: string[] };
+  webllm: { localModels: boolean; models: string[] };
+  policy: 'local' | 'local+cloud';
+}
+
+const OFFLINE_STATUS: AiStatus = {
+  ollama: { configured: false, reachable: false, models: [] },
+  webllm: { localModels: false, models: [] },
+  policy: 'local',
+};
+
+// Same conventions as src/api/client.ts: cookie identity, JSON error envelope.
+async function gateway<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase}${path}`, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'include',
+    });
+  } catch {
+    throw new ApiError('Could not reach the Cadence server', 0);
+  }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : undefined;
+  if (!res.ok) {
+    const err = data?.error;
+    throw new ApiError(err?.message ?? `Request failed (${res.status})`, res.status, err?.field);
+  }
+  return data as T;
+}
+
+/** Providers available right now; an unreachable server reads as "nothing configured". */
+export async function aiStatus(): Promise<AiStatus> {
+  try {
+    return await gateway<AiStatus>('GET', '/api/v1/ai/status');
+  } catch {
+    return OFFLINE_STATUS;
+  }
+}
+
 /* ------------------------------- Ollama --------------------------------- */
 
 export async function ollamaAvailable(): Promise<boolean> {
-  try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`, { method: 'GET' });
-    return r.ok;
-  } catch {
-    return false;
-  }
+  const st = await aiStatus();
+  return st.ollama.configured && st.ollama.reachable;
 }
 
-/** Names of models installed in the local Ollama server (empty if unreachable). */
+/** Names of models installed on the server's Ollama (empty if unreachable). */
 export async function ollamaList(): Promise<string[]> {
-  try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`);
-    if (!r.ok) return [];
-    const data = (await r.json()) as { models?: { name: string }[] };
-    return (data.models ?? []).map((m) => m.name);
-  } catch {
-    return [];
-  }
+  return (await aiStatus()).ollama.models;
 }
 
-export async function ollamaHasModel(model: string): Promise<boolean> {
-  const names = await ollamaList();
+export function ollamaHasModel(names: string[], model: string): boolean {
   const base = model.split(':')[0];
   return names.some((n) => n === model || n.startsWith(base));
 }
 
 async function ollamaChat(model: string, messages: ChatMessage[], json: boolean): Promise<string> {
-  const r = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      format: json ? 'json' : undefined,
-      options: { temperature: 0.2 },
-    }),
+  // The server adds stream:false + temperature and forwards to Ollama.
+  const data = await gateway<{ message?: { content?: string } }>('POST', '/api/v1/ai/chat', {
+    model,
+    messages,
+    format: json ? 'json' : undefined,
   });
-  if (!r.ok) throw new Error(`Ollama ${r.status}: ${await r.text()}`);
-  const data = (await r.json()) as { message?: { content?: string } };
   return data.message?.content ?? '';
 }
 
@@ -67,12 +99,58 @@ let webllmEngine: {
   chat: { completions: { create: (req: unknown) => Promise<unknown> } };
 } | null = null;
 let webllmModel = '';
+let webllmSource: 'server' | 'upstream' = 'upstream';
 
-async function loadWebllm(model: string, onProgress?: ProgressFn): Promise<void> {
+/** Where the last-loaded WebLLM artifacts came from. */
+export function webllmArtifactSource(): 'server' | 'upstream' {
+  return webllmSource;
+}
+
+/**
+ * Server-hosted artifacts are useful only if WebLLM's own (cookie-less) fetch
+ * can read them: that holds when the app and API share an origin, not for the
+ * split-origin dev setup. Probe with the same kind of request WebLLM makes.
+ */
+async function serverHostsModel(model: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${apiBase}/models/${encodeURIComponent(model)}/mlc-chat-config.json`, { method: 'HEAD' });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mirror prebuiltAppConfig for one model, pointing `model` (weights) and
+ * `model_lib` (wasm) at the Cadence server. Layout: /models/<id>/… and
+ * /models/lib/<wasm>. WebLLM appends `resolve/main/` to the weights URL, which
+ * the server strips.
+ *
+ * The URLs must be absolute: web-llm resolves each with `new URL(url)` and no
+ * base, which throws for a relative path — and in the embedded build apiBase
+ * is "" (same origin), exactly the case where the server hosts the weights.
+ */
+function localAppConfig(prebuilt: AppConfig, model: string): AppConfig | undefined {
+  const rec = prebuilt.model_list.find((m) => m.model_id === model);
+  if (!rec) return undefined;
+  const wasm = rec.model_lib.slice(rec.model_lib.lastIndexOf('/') + 1);
+  const abs = (path: string) => new URL(`${apiBase}${path}`, window.location.href).href;
+  return {
+    ...prebuilt,
+    model_list: [{ ...rec, model: abs(`/models/${model}/`), model_lib: abs(`/models/lib/${wasm}`) }],
+  };
+}
+
+async function loadWebllm(model: string, hosted: boolean, onProgress?: ProgressFn): Promise<void> {
   if (webllmEngine && webllmModel === model) return;
   const webllm = await import('@mlc-ai/web-llm');
+  let appConfig: AppConfig | undefined;
+  if (hosted && (await serverHostsModel(model))) appConfig = localAppConfig(webllm.prebuiltAppConfig, model);
+  webllmSource = appConfig ? 'server' : 'upstream';
+  onProgress?.(appConfig ? 'Loading model from your Cadence server…' : 'Loading model (weights from HuggingFace on first use)…');
   const worker = new Worker(new URL('./llm.worker.ts', import.meta.url), { type: 'module' });
   webllmEngine = (await webllm.CreateWebWorkerMLCEngine(worker, model, {
+    appConfig,
     initProgressCallback: (p: { text: string; progress: number }) => onProgress?.(p.text, p.progress),
   })) as typeof webllmEngine;
   webllmModel = model;
@@ -110,13 +188,15 @@ export function webgpuAvailable(): boolean {
 
 /** Load (or warm up) the chosen generation backend. */
 export async function loadLlm(opt: LlmModelOption, onProgress?: ProgressFn): Promise<void> {
+  onProgress?.(opt.backend === 'ollama' ? 'Checking the server…' : 'Checking WebGPU…');
+  const st = await aiStatus();
   if (opt.backend === 'ollama') {
-    onProgress?.('Connecting to Ollama…');
-    if (!(await ollamaAvailable())) throw new Error('Ollama is not running on localhost:11434');
-    if (!(await ollamaHasModel(opt.model))) throw new Error(`Model not found — run: ollama pull ${opt.model}`);
+    if (!st.ollama.configured) throw new Error('Ollama isn’t configured on the server (set OLLAMA_URL) — switch to an in-browser model.');
+    if (!st.ollama.reachable) throw new Error('The server can’t reach Ollama — is it running?');
+    if (!ollamaHasModel(st.ollama.models, opt.model)) throw new Error(`Model not found on the server — run: ollama pull ${opt.model}`);
   } else {
     if (!webgpuAvailable()) throw new Error('WebGPU is not available in this browser — switch to an Ollama model.');
-    await loadWebllm(opt.model, onProgress);
+    await loadWebllm(opt.model, st.webllm.localModels && st.webllm.models.includes(opt.model), onProgress);
   }
   active = opt;
 }

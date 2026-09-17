@@ -26,6 +26,30 @@ func NewID() string {
 	return FormatUUIDBytes(b)
 }
 
+// ValidUUID reports whether s is a canonical hyphenated UUID (8-4-4-4-12 hex,
+// either case). It is the shape check for caller-supplied ids and cursor
+// segments, so a malformed id is answered as "not found" / "bad cursor" by
+// every adapter rather than surfacing as a Postgres cast failure.
+func ValidUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < 36; i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // FormatUUIDBytes renders 16 bytes as a canonical hyphenated UUID string.
 func FormatUUIDBytes(b [16]byte) string {
 	var dst [36]byte

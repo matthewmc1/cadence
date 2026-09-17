@@ -47,12 +47,25 @@ type CreateTaskInput struct {
 	Links         []Link     `json:"links"`
 	Subtasks      []Subtask  `json:"subtasks"`
 	Assignees     []Assignee `json:"assignees"`
+
+	// Work-item fields (0013). Stage wins over Status when both are given;
+	// the other is derived (DeriveLifecycle). createdBy is never accepted —
+	// it is stamped from the actor.
+	Stage             *Stage     `json:"stage"`
+	OwnerID           *string    `json:"ownerId"`
+	RequirementID     *string    `json:"requirementId"`
+	DefinitionOfDone  *string    `json:"definitionOfDone"`
+	WaitingOnPersonID *string    `json:"waitingOnPersonId"`
+	WaitingOnReason   *string    `json:"waitingOnReason"`
+	Ask               *Ask       `json:"ask"`
+	AskBy             *time.Time `json:"askBy"`
 }
 
 // CreateProjectInput is the payload for POST /projects.
 type CreateProjectInput struct {
 	Name     string  `json:"name"`
 	Subtitle *string `json:"subtitle"`
+	Outcome  *string `json:"outcome"`
 	Due      *string `json:"due"`
 	Color    *string `json:"color"`
 	ClientID *string `json:"clientId"`
@@ -64,5 +77,6 @@ type CreateClientInput struct {
 	Tier              *string `json:"tier"`
 	Kind              *string `json:"kind"`
 	Color             *string `json:"color"`
+	Standard          *string `json:"standard"`
 	ExpectedTouchDays *int    `json:"expectedTouchDays"`
 }

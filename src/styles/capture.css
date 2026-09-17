@@ -144,3 +144,112 @@
     padding: 10vh 12px 20px;
   }
 }
+
+/* ============================================================
+   Inbox paste box — the same one field, in the page rather
+   than the palette. One textarea that grows; a kind pill that
+   reads what was pasted; ⌘↵ captures.
+   ============================================================ */
+.capture {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  padding: 14px 16px 10px;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.capture:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-warm-sm);
+}
+.capture__field {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  max-height: 320px;
+  resize: none;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.35;
+  color: var(--ink);
+  caret-color: var(--accent);
+  padding: 0;
+  overflow: auto;
+}
+.capture__field::placeholder {
+  color: var(--ink-label);
+  font-style: italic;
+}
+/* in flight: readOnly rather than disabled, so the caret never leaves the field */
+.capture.is-busy .capture__field {
+  color: var(--ink-3);
+  cursor: progress;
+}
+.capture__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-2);
+}
+.capture__kind {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  background: var(--fill);
+  border-radius: var(--r-pill);
+  padding: 3px 9px;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.capture.has-text .capture__kind--link {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+.capture.has-text .capture__kind--email,
+.capture.has-text .capture__kind--meeting {
+  color: #41566a;
+  background: var(--fill-admin);
+}
+.capture.has-text .capture__kind--note {
+  color: #4e5e45;
+  background: var(--fill-sage);
+}
+.capture__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.capture__hint-sep {
+  margin: 0 4px;
+}
+.capture__go {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 7px 14px;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.capture__go:hover {
+  transform: translateY(-1px);
+}
+.capture__go:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+@media (max-width: 900px) {
+  .capture__go {
+    min-height: 44px;
+  }
+}

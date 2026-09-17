@@ -75,19 +75,24 @@ func requestID(next http.Handler) http.Handler {
 	})
 }
 
-// cors reflects the request Origin and allows credentials (cookies). A specific
-// origin is echoed (never `*`) because credentialed requests forbid wildcard.
+// cors echoes the request Origin and allows credentials (cookies) ONLY when
+// the origin is on the CADENCE_WEB_ORIGINS allowlist — the same list the
+// WebSocket handshake and magic-link bases trust. A specific origin is echoed
+// (never `*`) because credentialed requests forbid wildcard; an unlisted
+// origin gets no Access-Control-* headers at all, so the browser refuses to
+// hand it the response (a preflight from it answers 204 with nothing
+// allowed). Same-origin requests carry no CORS semantics and are unaffected.
 func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		if origin := r.Header.Get("Origin"); origin != "" {
+		h.Add("Vary", "Origin")
+		if origin := r.Header.Get("Origin"); origin != "" && s.originAllowed(origin) {
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Set("Access-Control-Allow-Credentials", "true")
-			h.Add("Vary", "Origin")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, If-Match, Authorization")
+			h.Set("Access-Control-Max-Age", "600")
 		}
-		h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, If-Match, Authorization")
-		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

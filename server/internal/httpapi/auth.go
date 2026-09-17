@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cadence/server/internal/domain"
+	"github.com/cadence/server/internal/mailer"
 )
 
 func newToken() string {
@@ -57,31 +59,109 @@ func (s *Server) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tok := newToken()
-	if err := s.store.CreateLoginToken(r.Context(), hashToken(tok), email, now.Add(s.loginTokenTTL)); err != nil {
+	// Signup policy (signup.go). An address that may not sign in gets exactly
+	// the response an allowed one gets, and no email: a closed door that never
+	// confirms whether an account exists behind it.
+	allowed, err := s.signupAllowed(r.Context(), email)
+	if err != nil {
 		writeError(w, s.log, err)
 		return
 	}
-	link := s.linkBase(r) + "/auth?token=" + tok
-
-	// Deliver the link by email. A live-provider failure is surfaced to the user
-	// so they aren't left waiting for a mail that will never arrive (there is no
-	// account-enumeration concern: an account is created on verify, not request,
-	// so every well-formed email is treated identically).
-	if err := s.mailer.SendMagicLink(r.Context(), email, link); err != nil {
-		s.log.Error("magic link send failed", "email", email, "err", err)
-		writeJSON(w, http.StatusBadGateway, errBody{errPayload{Message: "couldn't send your sign-in email — please try again", Code: "mail_failed"}})
+	if !allowed {
+		s.log.Info("magic link withheld", "email", mailer.Redact(email), "signup", s.signup.String())
+		writeJSON(w, http.StatusOK, okResp)
 		return
 	}
-	s.authRate.recordEmailSent(email, now) // start the cooldown only on a real send
-	s.log.Info("magic link issued", "email", email, "delivered", s.mailer.Live())
 
-	// In dev we also hand back the link for convenience. Never do this once a
-	// real mail provider is delivering it — the link is a bearer credential.
-	if s.devAuth && !s.mailer.Live() {
-		okResp["devLink"] = link
+	tok := newToken()
+	req := magicLinkRequest{
+		email:     email,
+		link:      s.linkBase(r) + "/auth?token=" + tok,
+		tokenHash: hashToken(tok),
+		expiresAt: now.Add(s.loginTokenTTL),
+		ipHash:    s.hashIP(clientIP(r)),
 	}
+
+	// Issue and deliver the link OFF the request. This endpoint is public, and
+	// under an invite/domains policy the only difference between an admitted
+	// address and a withheld one is whether an account exists — so the
+	// response's status AND its latency must be the same on both paths. Every
+	// step that only an admitted address reaches (the token insert, the
+	// account lookup, the audit append, the SMTP round-trip) therefore happens
+	// after the response is decided, detached from the request with its own
+	// deadline; a failure is logged, never surfaced. Both branches answer
+	// after exactly one signupAllowed lookup.
+	s.authRate.recordEmailSent(email, now)
+	if s.devAuth && !s.mailer.Live() {
+		// Dev convenience: the link comes back in the response, so the token
+		// has to exist before we answer. There is no enumeration to protect
+		// against here — no provider is delivering anything.
+		s.issueMagicLink(req)
+		okResp["devLink"] = req.link
+	} else {
+		go s.issueMagicLink(req)
+	}
+	s.log.Info("magic link issued", "email", mailer.Redact(email), "delivered", s.mailer.Live())
 	writeJSON(w, http.StatusOK, okResp)
+}
+
+// magicLinkRequest is one issued link, carried off the request path: the
+// address it is for, the link itself, the token hash to store, its expiry, and
+// the hash of the client address for the audit row (computed while the request
+// is still alive — nothing here holds on to *http.Request).
+type magicLinkRequest struct {
+	email, link, tokenHash, ipHash string
+	expiresAt                      time.Time
+}
+
+// magicLinkSendTimeout bounds one detached delivery attempt; magicLinkStoreTimeout
+// bounds the two store writes around it.
+const (
+	magicLinkSendTimeout  = 30 * time.Second
+	magicLinkStoreTimeout = 5 * time.Second
+)
+
+// issueMagicLink stores the one-time token, audits the issue under the
+// account's tenant and sends the mail — the whole admitted-address path, off
+// the request (see handleAuthRequest). Nothing it does can be surfaced to the
+// caller, so every failure is logged and the address never is.
+func (s *Server) issueMagicLink(req magicLinkRequest) {
+	ctx, cancel := context.WithTimeout(context.Background(), magicLinkStoreTimeout)
+	if err := s.store.CreateLoginToken(ctx, req.tokenHash, req.email, req.expiresAt); err != nil {
+		s.log.Error("magic link token not stored", "email", mailer.Redact(req.email), "err", err)
+		cancel()
+		return
+	}
+	// Audit under the account's tenant when there is one. A first-time
+	// sign-up has no tenant until verify creates it, so its first row is the
+	// auth.login.verified one; the email itself never reaches the log.
+	if acc, err := s.store.FindAccount(ctx, req.email); err == nil {
+		e := domain.AuditEntry{ActorID: &acc.UserID, Kind: domain.AuditLoginIssued}
+		if req.ipHash != "" {
+			e.IPHash = &req.ipHash
+		}
+		if _, err := s.store.AppendAudit(ctx, acc.TenantID, e); err != nil {
+			s.log.Warn("audit append failed", "kind", e.Kind, "err", err)
+		}
+	}
+	cancel()
+	s.deliverMagicLink(req.email, req.link)
+}
+
+// deliverMagicLink sends the link with its own deadline. The address is never
+// logged, and neither is a provider's error verbatim: SMTP rejections and
+// Resend's sandbox errors quote the recipient back at us, so the error text
+// goes through the same redaction the address does.
+func (s *Server) deliverMagicLink(email, link string) {
+	ctx, cancel := context.WithTimeout(context.Background(), magicLinkSendTimeout)
+	defer cancel()
+	if err := s.mailer.SendMagicLink(ctx, email, link); err != nil {
+		s.log.Error("magic link send failed", "email", mailer.Redact(email), "err", mailer.RedactErr(err))
+		return
+	}
+	if s.mailer.Live() {
+		s.log.Info("magic link delivered", "email", mailer.Redact(email))
+	}
 }
 
 // POST /auth/verify {token} — consume the link, start a session, set the cookie.
@@ -101,6 +181,16 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-check the policy here too: a link issued before CADENCE_SIGNUP was
+	// tightened must not be the one thing that still creates a workspace.
+	if allowed, err := s.signupAllowed(ctx, email); err != nil {
+		writeError(w, s.log, err)
+		return
+	} else if !allowed {
+		writeJSON(w, http.StatusForbidden, errBody{errPayload{Message: "sign-in for this address needs an invitation", Code: "not_invited"}})
+		return
+	}
+
 	acc, err := s.store.FindOrCreateAccount(ctx, email)
 	if err != nil {
 		writeError(w, s.log, err)
@@ -116,6 +206,7 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSessionCookie(w, sessionTok, exp)
+	s.auditLog(r, acc.TenantID, domain.AuditEntry{ActorID: &acc.UserID, Kind: domain.AuditLoginVerified})
 
 	writeJSON(w, http.StatusOK, map[string]any{"user": domain.DeriveUser(acc.UserID, acc.TenantID, email)})
 }
@@ -170,6 +261,13 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, s.log, err)
 		return
 	}
+	// The token's display name is the only detail; its secret never leaves
+	// this response.
+	s.auditLog(r, tok.TenantID, domain.AuditEntry{
+		ActorID: &tok.UserID, Kind: domain.AuditTokenCreate,
+		EntityType: ptr(domain.EntityAPIToken), EntityID: &tok.ID,
+		Detail: auditDetail(map[string]any{"name": tok.Name}),
+	})
 	// `token` is returned only here, once.
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token": raw, "id": tok.ID, "name": tok.Name, "createdAt": tok.CreatedAt,
@@ -194,6 +292,10 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, s.log, err)
 		return
 	}
+	s.auditLog(r, TenantID(ctx), domain.AuditEntry{
+		ActorID: ptr(ActorID(ctx)), Kind: domain.AuditTokenRevoke,
+		EntityType: ptr(domain.EntityAPIToken), EntityID: ptr(r.PathValue("id")),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

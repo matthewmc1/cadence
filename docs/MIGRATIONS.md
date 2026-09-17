@@ -41,6 +41,14 @@ that's still running. That means:
   running code references them.
 - **Never** rename or retype a column in place, add a `NOT NULL` column with no
   default to a large table, or drop a column the old code still selects.
+- **Backfills run with RLS bypassed.** Tenant tables are `FORCE ROW LEVEL
+  SECURITY` with a fail-closed policy and the runner sets no `app.tenant_id`,
+  so a data `UPDATE` in a migration matches **zero rows** for any migrating
+  role that is not a superuser / `BYPASSRLS` — the table owner included — and
+  succeeds anyway. Wrap it in `ALTER TABLE … NO FORCE ROW LEVEL SECURITY` /
+  `… FORCE ROW LEVEL SECURITY` and add a postcondition (`DO $$ … RAISE
+  EXCEPTION …`) so a fenced backfill fails the migration instead of silently
+  skipping it (see `0013_work_item_fields.up.sql`).
 
 This is the **expand → contract** pattern.
 

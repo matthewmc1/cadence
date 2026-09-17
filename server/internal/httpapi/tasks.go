@@ -12,9 +12,24 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := store.TaskFilter{}
 	q := r.URL.Query()
+	// Filters are validated here rather than passed through: an unknown enum
+	// value would otherwise fail the ::task_status cast in Postgres (a 500)
+	// while the memory adapter simply matched nothing.
 	if v := q.Get("status"); v != "" {
 		st := domain.Status(v)
+		if !st.Valid() {
+			writeError(w, s.log, domain.Invalid("status", "must be one of backlog, scheduled, focus, done"))
+			return
+		}
 		f.Status = &st
+	}
+	if v := q.Get("stage"); v != "" {
+		st := domain.Stage(v)
+		if !st.Valid() {
+			writeError(w, s.log, domain.Invalid("stage", "must be one of todo, doing, waiting, done"))
+			return
+		}
+		f.Stage = &st
 	}
 	if v := q.Get("projectId"); v != "" {
 		f.ProjectID = &v

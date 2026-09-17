@@ -14,6 +14,7 @@ import (
 	"github.com/cadence/server/internal/domain"
 	"github.com/cadence/server/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,13 +22,17 @@ type Config struct {
 	URL         string
 	AutoMigrate bool
 	Log         *slog.Logger
+	// OutboxRetention is how long outbox rows are kept before the hourly
+	// pruner deletes them (see outbox.go). Zero = DefaultOutboxRetention.
+	OutboxRetention time.Duration
 }
 
 type Store struct {
-	pool   *pgxpool.Pool
-	log    *slog.Logger
-	fan    *fanout
-	cancel context.CancelFunc
+	pool      *pgxpool.Pool
+	log       *slog.Logger
+	fan       *fanout
+	cancel    context.CancelFunc
+	retention time.Duration
 }
 
 // Open connects the pool, optionally migrates, and starts the LISTEN loop.
@@ -60,9 +65,14 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 		}
 	}
 
+	retention := cfg.OutboxRetention
+	if retention <= 0 {
+		retention = DefaultOutboxRetention
+	}
 	lctx, cancel := context.WithCancel(context.Background())
-	s := &Store{pool: pool, log: log, fan: newFanout(), cancel: cancel}
+	s := &Store{pool: pool, log: log, fan: newFanout(), cancel: cancel, retention: retention}
 	go listen(lctx, pool, s.fan, log)
+	go s.pruneLoop(lctx) // stops with cancel() in Close
 	return s, nil
 }
 
@@ -99,7 +109,12 @@ func (s *Store) withTenant(ctx context.Context, tenantID string, fn func(context
 
 const taskCols = `tenant_id::text, id::text, project_id::text, title, kind::text, status::text,
 	effort_minutes, urgent, important, note, reflection, place, scheduled_at,
-	position, done_at, deadline, recurrence, links, subtasks, assignees, version, created_at, updated_at`
+	position, done_at, deadline, recurrence, links, subtasks, assignees,
+	stage, owner_id::text, created_by::text, requirement_id::text, definition_of_done,
+	waiting_on_person_id::text, waiting_on_reason, waiting_on_since, ask, ask_by,
+	version, created_at, updated_at,
+	(SELECT count(*) FROM work_item_signals wis WHERE wis.tenant_id = tasks.tenant_id AND wis.task_id = tasks.id) AS origin_count,
+	(SELECT count(*) FROM outputs o WHERE o.tenant_id = tasks.tenant_id AND o.task_id = tasks.id) AS output_count`
 
 type taskRow struct {
 	TenantID      string     `db:"tenant_id"`
@@ -122,9 +137,23 @@ type taskRow struct {
 	Links         []byte     `db:"links"`
 	Subtasks      []byte     `db:"subtasks"`
 	Assignees     []byte     `db:"assignees"`
-	Version       int        `db:"version"`
-	CreatedAt     time.Time  `db:"created_at"`
-	UpdatedAt     time.Time  `db:"updated_at"`
+	// work-item fields (0013)
+	Stage             string     `db:"stage"`
+	OwnerID           *string    `db:"owner_id"`
+	CreatedBy         *string    `db:"created_by"`
+	RequirementID     *string    `db:"requirement_id"`
+	DefinitionOfDone  string     `db:"definition_of_done"`
+	WaitingOnPersonID *string    `db:"waiting_on_person_id"`
+	WaitingOnReason   string     `db:"waiting_on_reason"`
+	WaitingOnSince    *time.Time `db:"waiting_on_since"`
+	Ask               []byte     `db:"ask"`
+	AskBy             *time.Time `db:"ask_by"`
+	Version           int        `db:"version"`
+	CreatedAt         time.Time  `db:"created_at"`
+	UpdatedAt         time.Time  `db:"updated_at"`
+	// derived counts (0014/0015), computed by the two sub-selects in taskCols
+	OriginCount int `db:"origin_count"`
+	OutputCount int `db:"output_count"`
 }
 
 func (r taskRow) toTask() domain.Task {
@@ -133,11 +162,16 @@ func (r taskRow) toTask() domain.Task {
 		Kind: domain.Kind(r.Kind), Status: domain.Status(r.Status), EffortMinutes: r.EffortMinutes,
 		Urgent: r.Urgent, Important: r.Important, Note: r.Note, Reflection: r.Reflection, Place: r.Place, ScheduledAt: r.ScheduledAt,
 		Position: r.Position, DoneAt: r.DoneAt, Deadline: r.Deadline, Recurrence: r.Recurrence,
+		Stage: domain.Stage(r.Stage), OwnerID: r.OwnerID, CreatedBy: r.CreatedBy, RequirementID: r.RequirementID,
+		DefinitionOfDone: r.DefinitionOfDone, WaitingOnPersonID: r.WaitingOnPersonID, WaitingOnReason: r.WaitingOnReason,
+		WaitingOnSince: r.WaitingOnSince, AskBy: r.AskBy,
+		OriginCount: r.OriginCount, OutputCount: r.OutputCount,
 		Version: r.Version, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 	_ = json.Unmarshal(r.Links, &t.Links)
 	_ = json.Unmarshal(r.Subtasks, &t.Subtasks)
 	_ = json.Unmarshal(r.Assignees, &t.Assignees)
+	_ = json.Unmarshal(r.Ask, &t.Ask)
 	t.Normalize()
 	return t
 }
@@ -176,6 +210,12 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 		}
 		boot.Projects = projects
 
+		requirements, err := selectRequirements(ctx, tx, tenantID, store.RequirementFilter{})
+		if err != nil {
+			return err
+		}
+		boot.Requirements = requirements
+
 		tasks, err := selectTasks(ctx, tx, tenantID, "")
 		if err != nil {
 			return err
@@ -193,6 +233,9 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 	if boot.Projects == nil {
 		boot.Projects = []domain.Project{}
 	}
+	if boot.Requirements == nil {
+		boot.Requirements = []domain.Requirement{}
+	}
 	if boot.Tasks == nil {
 		boot.Tasks = []domain.Task{}
 	}
@@ -202,26 +245,67 @@ func (s *Store) Bootstrap(ctx context.Context, tenantID, userID string) (*domain
 func (s *Store) ListTasks(ctx context.Context, tenantID string, f store.TaskFilter) ([]domain.Task, error) {
 	var out []domain.Task
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		extra := ""
-		var args []any
-		add := func(cond string, v any) {
-			args = append(args, v)
-			extra += " AND " + fmt.Sprintf(cond, len(args)+1) // +1: $1 is tenant_id in selectTasks
-		}
-		if f.Status != nil {
-			add("status = $%d::task_status", string(*f.Status))
-		}
-		if f.ProjectID != nil {
-			add("project_id = $%d", *f.ProjectID)
-		}
+		extra, args := taskFilterWhere(f)
 		tasks, err := selectTasks(ctx, tx, tenantID, extra, args...)
 		if err != nil {
-			return err
+			return emptyOnBadUUID(err) // a non-uuid projectId matches nothing
 		}
 		out = tasks
 		return nil
 	})
 	return out, err
+}
+
+// ListTasksPaged is the keyset-paged read: same tenant fence and filter as
+// ListTasks, then the cursor predicate, newest-first order and a limit+1 fetch
+// that store.Paginate trims into the page (see store/paging.go).
+func (s *Store) ListTasksPaged(ctx context.Context, tenantID string, f store.TaskFilter, p store.Page) (store.PageResult[domain.Task], error) {
+	cur, err := store.DecodeCursor(p.Cursor)
+	if err != nil {
+		return store.PageResult[domain.Task]{}, err
+	}
+	limit := p.EffectiveLimit()
+
+	var out store.PageResult[domain.Task]
+	err = s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		extra, args := taskFilterWhere(f)
+		after, cursorArgs := keysetWhere(cur, "created_at", len(args)+2) // +2: $1 is tenant_id
+		args = append(args, cursorArgs...)
+		args = append(args, limit+1)
+		q := `SELECT ` + taskCols + ` FROM tasks WHERE tenant_id = $1` + extra + after +
+			fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d`, len(args)+1)
+		rows, err := queryTasks(ctx, tx, q, append([]any{tenantID}, args...)...)
+		if err != nil {
+			return emptyOnBadUUID(err)
+		}
+		out = store.Paginate(rows, limit, store.TaskKey)
+		return nil
+	})
+	if out.Items == nil {
+		out.Items = []domain.Task{}
+	}
+	return out, err
+}
+
+// taskFilterWhere renders a TaskFilter as ` AND …` clauses with placeholders
+// numbered from $2 ($1 is always tenant_id), plus their args.
+func taskFilterWhere(f store.TaskFilter) (string, []any) {
+	extra := ""
+	var args []any
+	add := func(cond string, v any) {
+		args = append(args, v)
+		extra += " AND " + fmt.Sprintf(cond, len(args)+1)
+	}
+	if f.Status != nil {
+		add("status = $%d::task_status", string(*f.Status))
+	}
+	if f.Stage != nil {
+		add("stage = $%d", string(*f.Stage))
+	}
+	if f.ProjectID != nil {
+		add("project_id = $%d", *f.ProjectID)
+	}
+	return extra, args
 }
 
 func (s *Store) GetTask(ctx context.Context, tenantID, id string) (*domain.Task, error) {
@@ -255,7 +339,13 @@ func (s *Store) ListProjects(ctx context.Context, tenantID string) ([]domain.Pro
 // caller filters go in extraWhere with placeholders starting at $2.
 func selectTasks(ctx context.Context, tx pgx.Tx, tenantID, extraWhere string, args ...any) ([]domain.Task, error) {
 	all := append([]any{tenantID}, args...)
-	rows, err := tx.Query(ctx, `SELECT `+taskCols+` FROM tasks WHERE tenant_id = $1`+extraWhere+` ORDER BY position, created_at`, all...)
+	return queryTasks(ctx, tx, `SELECT `+taskCols+` FROM tasks WHERE tenant_id = $1`+extraWhere+` ORDER BY position, created_at`, all...)
+}
+
+// queryTasks runs a full-column tasks query and maps the rows. The caller
+// owns the WHERE/ORDER/LIMIT — and the tenant predicate that must be in it.
+func queryTasks(ctx context.Context, tx pgx.Tx, q string, args ...any) ([]domain.Task, error) {
+	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -277,14 +367,14 @@ func getTaskTx(ctx context.Context, tx pgx.Tx, tenantID, id string, forUpdate bo
 	}
 	rows, err := tx.Query(ctx, q, id, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, notFoundOnBadUUID(err)
 	}
 	r, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[taskRow])
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, notFoundOnBadUUID(err)
 	}
 	t := r.toTask()
 	return &t, nil
@@ -292,7 +382,7 @@ func getTaskTx(ctx context.Context, tx pgx.Tx, tenantID, id string, forUpdate bo
 
 func selectProjects(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.Project, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, tenant_id::text, client_id::text, name, subtitle, due, color, version, created_at, updated_at
+		SELECT id::text, tenant_id::text, client_id::text, name, subtitle, outcome, due, color, archived_at, version, created_at, updated_at
 		FROM projects WHERE tenant_id = $1 ORDER BY created_at`, tenantID)
 	if err != nil {
 		return nil, err
@@ -303,7 +393,7 @@ func selectProjects(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.P
 	index := map[string]int{}
 	for rows.Next() {
 		var p domain.Project
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Outcome, &p.Due, &p.Color, &p.ArchivedAt, &p.Version, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.Members = []domain.ProjectMember{}
@@ -335,59 +425,16 @@ func selectProjects(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.P
 // ---- task writes -----------------------------------------------------------
 
 func (s *Store) CreateTask(ctx context.Context, tenantID, actorID string, in domain.CreateTaskInput) (*domain.Task, error) {
-	title := trim(in.Title)
-	if title == "" {
-		return nil, domain.Invalid("title", "is required")
-	}
-	kind, effort := domain.Infer(title)
-	if in.Kind != nil {
-		if !in.Kind.Valid() {
-			return nil, domain.Invalid("kind", "is invalid")
-		}
-		kind = *in.Kind
-	}
-	if in.EffortMinutes != nil {
-		effort = *in.EffortMinutes
-	}
-	status := domain.StatusBacklog
-	if in.Status != nil {
-		if !in.Status.Valid() {
-			return nil, domain.Invalid("status", "is invalid")
-		}
-		status = *in.Status
-	}
-
-	now := time.Now().UTC()
-	t := domain.Task{
-		ID: domain.NewID(), TenantID: tenantID, ProjectID: in.ProjectID, Title: title,
-		Kind: kind, Status: status, EffortMinutes: effort, Note: deref(in.Note), Reflection: deref(in.Reflection), Place: in.Place,
-		ScheduledAt: in.ScheduledAt,
-		Version:     1, CreatedAt: now, UpdatedAt: now,
-	}
-	if in.Urgent != nil {
-		t.Urgent = *in.Urgent
-	}
-	if in.Important != nil {
-		t.Important = *in.Important
-	}
-	if in.Position != nil {
-		t.Position = *in.Position
-	}
-	if in.Deadline != nil {
-		t.Deadline = in.Deadline
-	}
-	if in.Recurrence != nil {
-		t.Recurrence = *in.Recurrence
-	}
-	t.Links = in.Links
-	t.Subtasks = in.Subtasks
-	t.Assignees = in.Assignees
-	if status == domain.StatusDone {
-		t.DoneAt = &now
+	t, err := store.NewTask(tenantID, actorID, in, time.Now().UTC())
+	if err != nil {
+		return nil, err
 	}
 
 	var created *domain.Task
-	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireTaskRefs(ctx, tx, tenantID, &t); err != nil {
+			return err
+		}
 		if err := insertTask(ctx, tx, t); err != nil {
 			return err
 		}
@@ -419,18 +466,26 @@ func (s *Store) UpdateTask(ctx context.Context, tenantID, actorID, id string, pa
 		if err := store.ApplyTaskPatch(&next, patch, now); err != nil {
 			return err
 		}
+		if err := requireTaskRefs(ctx, tx, tenantID, &next); err != nil {
+			return err
+		}
 		next.Version = existing.Version + 1
+		// created_by is never rewritten: it is attribution stamped at insert.
 		if _, err := tx.Exec(ctx, `
 			UPDATE tasks SET
 				project_id = $2, title = $3, kind = $4::task_kind, status = $5::task_status,
 				effort_minutes = $6, urgent = $7, note = $8, place = $9,
 				scheduled_at = $10, position = $11, done_at = $12, deadline = $13, recurrence = $14,
-				links = $15::jsonb, subtasks = $16::jsonb, assignees = $17::jsonb, version = $18, important = $19, reflection = $20
+				links = $15::jsonb, subtasks = $16::jsonb, assignees = $17::jsonb, version = $18, important = $19, reflection = $20,
+				stage = $22, owner_id = $23, requirement_id = $24, definition_of_done = $25,
+				waiting_on_person_id = $26, waiting_on_reason = $27, waiting_on_since = $28, ask = $29::jsonb, ask_by = $30
 			WHERE id = $1 AND tenant_id = $21`,
 			id, next.ProjectID, next.Title, string(next.Kind), string(next.Status), next.EffortMinutes,
 			next.Urgent, next.Note, next.Place, next.ScheduledAt,
 			next.Position, next.DoneAt, next.Deadline, next.Recurrence,
-			jsonArr(next.Links), jsonArr(next.Subtasks), jsonArr(next.Assignees), next.Version, next.Important, next.Reflection, tenantID); err != nil {
+			jsonArr(next.Links), jsonArr(next.Subtasks), jsonArr(next.Assignees), next.Version, next.Important, next.Reflection, tenantID,
+			string(next.Stage), next.OwnerID, next.RequirementID, next.DefinitionOfDone,
+			next.WaitingOnPersonID, next.WaitingOnReason, next.WaitingOnSince, jsonObj(next.Ask), next.AskBy); err != nil {
 			return err
 		}
 		got, err := getTaskTx(ctx, tx, tenantID, id, false)
@@ -450,14 +505,14 @@ func (s *Store) DeleteTask(ctx context.Context, tenantID, actorID, id string) er
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		ct, err := tx.Exec(ctx, `DELETE FROM tasks WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 		if err != nil {
-			return err
+			return notFoundOnBadUUID(err)
 		}
 		if ct.RowsAffected() == 0 {
 			return domain.ErrNotFound
 		}
 		return emit(ctx, tx, domain.Event{
 			ID: domain.NewID(), Type: domain.EventTaskDeleted, TenantID: tenantID,
-			ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+			ActorID: actorID, EntityType: domain.EntityTask, EntityID: id, At: time.Now().UTC(),
 		})
 	})
 }
@@ -468,15 +523,21 @@ func insertTask(ctx context.Context, tx pgx.Tx, t domain.Task) error {
 		INSERT INTO tasks (
 			tenant_id, id, project_id, title, kind, status, effort_minutes, urgent, note, place,
 			scheduled_at, position, done_at,
-			deadline, recurrence, links, subtasks, assignees, version, created_at, updated_at, important, reflection
+			deadline, recurrence, links, subtasks, assignees, version, created_at, updated_at, important, reflection,
+			stage, owner_id, created_by, requirement_id, definition_of_done,
+			waiting_on_person_id, waiting_on_reason, waiting_on_since, ask, ask_by
 		) VALUES (
 			$1, $2, $3, $4, $5::task_kind, $6::task_status, $7, $8, $9, $10,
 			$11, $12, $13,
-			$14, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19, $20, $21, $22, $23
+			$14, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19, $20, $21, $22, $23,
+			$24, $25, $26, $27, $28,
+			$29, $30, $31, $32::jsonb, $33
 		)`,
 		t.TenantID, t.ID, t.ProjectID, t.Title, string(t.Kind), string(t.Status), t.EffortMinutes, t.Urgent, t.Note, t.Place,
 		t.ScheduledAt, t.Position, t.DoneAt,
-		t.Deadline, t.Recurrence, jsonArr(t.Links), jsonArr(t.Subtasks), jsonArr(t.Assignees), t.Version, t.CreatedAt, t.UpdatedAt, t.Important, t.Reflection)
+		t.Deadline, t.Recurrence, jsonArr(t.Links), jsonArr(t.Subtasks), jsonArr(t.Assignees), t.Version, t.CreatedAt, t.UpdatedAt, t.Important, t.Reflection,
+		string(t.Stage), t.OwnerID, t.CreatedBy, t.RequirementID, t.DefinitionOfDone,
+		t.WaitingOnPersonID, t.WaitingOnReason, t.WaitingOnSince, jsonObj(t.Ask), t.AskBy)
 	return err
 }
 
@@ -489,6 +550,16 @@ func jsonArr(v any) string {
 	return string(b)
 }
 
+// jsonObj marshals a struct/map to a JSON object string ("{}" on nil/failure)
+// for jsonb insert — the ask column is CHECKed to be an object.
+func jsonObj(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil || string(b) == "null" {
+		return "{}"
+	}
+	return string(b)
+}
+
 // ---- project writes --------------------------------------------------------
 
 func (s *Store) CreateProject(ctx context.Context, tenantID, actorID string, in domain.CreateProjectInput) (*domain.Project, error) {
@@ -496,17 +567,25 @@ func (s *Store) CreateProject(ctx context.Context, tenantID, actorID string, in 
 	if name == "" {
 		return nil, domain.Invalid("name", "is required")
 	}
-	now := time.Now().UTC()
+	// Microsecond precision: timestamptz stores µs, and the struct we return is
+	// not re-read from the row, so truncate to keep create == later reads.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	p := domain.Project{
 		ID: domain.NewID(), TenantID: tenantID, ClientID: in.ClientID, Name: name, Subtitle: deref(in.Subtitle),
-		Due: in.Due, Color: orDefault(in.Color, "#C2743D"), Members: []domain.ProjectMember{},
+		Outcome: trim(deref(in.Outcome)), Due: in.Due, Color: orDefault(in.Color, "#C2743D"), Members: []domain.ProjectMember{},
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	if err := store.CheckTextLen("outcome", p.Outcome); err != nil {
+		return nil, err
+	}
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireClient(ctx, tx, tenantID, p.ClientID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO projects (tenant_id, id, client_id, name, subtitle, due, color, version, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-			p.TenantID, p.ID, p.ClientID, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.CreatedAt, p.UpdatedAt); err != nil {
+			INSERT INTO projects (tenant_id, id, client_id, name, subtitle, outcome, due, color, version, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			p.TenantID, p.ID, p.ClientID, p.Name, p.Subtitle, p.Outcome, p.Due, p.Color, p.Version, p.CreatedAt, p.UpdatedAt); err != nil {
 			return err
 		}
 		return emit(ctx, tx, projectEvent(domain.EventProjectCreated, actorID, &p))
@@ -522,14 +601,14 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var p domain.Project
 		err := tx.QueryRow(ctx, `
-			SELECT id::text, tenant_id::text, client_id::text, name, subtitle, due, color, version, created_at, updated_at
+			SELECT id::text, tenant_id::text, client_id::text, name, subtitle, outcome, due, color, archived_at, version, created_at, updated_at
 			FROM projects WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, id, tenantID).
-			Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Due, &p.Color, &p.Version, &p.CreatedAt, &p.UpdatedAt)
+			Scan(&p.ID, &p.TenantID, &p.ClientID, &p.Name, &p.Subtitle, &p.Outcome, &p.Due, &p.Color, &p.ArchivedAt, &p.Version, &p.CreatedAt, &p.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
 		}
 		if err != nil {
-			return err
+			return notFoundOnBadUUID(err)
 		}
 		if expectedVersion != nil && *expectedVersion != p.Version {
 			return domain.ErrConflict
@@ -557,10 +636,31 @@ func (s *Store) UpdateProject(ctx context.Context, tenantID, actorID, id string,
 		if c, ok := patch["color"].(string); ok {
 			p.Color = c
 		}
+		if o, ok := patch["outcome"].(string); ok {
+			if err := store.CheckTextLen("outcome", o); err != nil {
+				return err
+			}
+			p.Outcome = trim(o)
+		}
+		if v, ok := patch["archived"]; ok {
+			if b, _ := v.(bool); b {
+				if p.ArchivedAt == nil {
+					at := time.Now().UTC().Truncate(time.Microsecond)
+					p.ArchivedAt = &at
+				}
+			} else {
+				p.ArchivedAt = nil
+			}
+		}
+		if err := requireClient(ctx, tx, tenantID, p.ClientID); err != nil {
+			return err
+		}
 		p.Version++
-		if _, err := tx.Exec(ctx,
-			`UPDATE projects SET name=$2, subtitle=$3, due=$4, color=$5, version=$6, client_id=$7 WHERE id=$1 AND tenant_id=$8`,
-			id, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.ClientID, tenantID); err != nil {
+		// RETURNING updated_at so the response/event carry the trigger-bumped
+		// timestamp rather than the pre-update value we SELECTed above.
+		if err := tx.QueryRow(ctx,
+			`UPDATE projects SET name=$2, subtitle=$3, due=$4, color=$5, version=$6, client_id=$7, outcome=$9, archived_at=$10 WHERE id=$1 AND tenant_id=$8 RETURNING updated_at`,
+			id, p.Name, p.Subtitle, p.Due, p.Color, p.Version, p.ClientID, tenantID, p.Outcome, p.ArchivedAt).Scan(&p.UpdatedAt); err != nil {
 			return err
 		}
 		members, err := projectMembers(ctx, tx, tenantID, id)
@@ -581,14 +681,14 @@ func (s *Store) DeleteProject(ctx context.Context, tenantID, actorID, id string)
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		ct, err := tx.Exec(ctx, `DELETE FROM projects WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 		if err != nil {
-			return err
+			return notFoundOnBadUUID(err)
 		}
 		if ct.RowsAffected() == 0 {
 			return domain.ErrNotFound
 		}
 		return emit(ctx, tx, domain.Event{
 			ID: domain.NewID(), Type: domain.EventProjectDeleted, TenantID: tenantID,
-			ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+			ActorID: actorID, EntityType: domain.EntityProject, EntityID: id, At: time.Now().UTC(),
 		})
 	})
 }
@@ -614,7 +714,7 @@ func projectMembers(ctx context.Context, tx pgx.Tx, tenantID, projectID string) 
 
 func selectClients(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.Client, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, tenant_id::text, name, tier, kind, color, expected_touch_days, archived_at, version, created_at, updated_at
+		SELECT id::text, tenant_id::text, name, tier, kind, color, standard, expected_touch_days, archived_at, version, created_at, updated_at
 		FROM clients WHERE tenant_id = $1 ORDER BY created_at`, tenantID)
 	if err != nil {
 		return nil, err
@@ -623,7 +723,7 @@ func selectClients(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.Cl
 	var out []domain.Client
 	for rows.Next() {
 		var c domain.Client
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color,
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color, &c.Standard,
 			&c.ExpectedTouchDays, &c.ArchivedAt, &c.Version, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -661,17 +761,20 @@ func (s *Store) CreateClient(ctx context.Context, tenantID, actorID string, in d
 	if in.ExpectedTouchDays != nil && *in.ExpectedTouchDays <= 0 {
 		return nil, domain.Invalid("expectedTouchDays", "must be positive")
 	}
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond) // see CreateProject
 	c := domain.Client{
 		ID: domain.NewID(), TenantID: tenantID, Name: name, Tier: tier, Kind: kind,
-		Color: orDefault(in.Color, "#6E7E91"), ExpectedTouchDays: in.ExpectedTouchDays,
+		Color: orDefault(in.Color, "#6E7E91"), Standard: trim(deref(in.Standard)), ExpectedTouchDays: in.ExpectedTouchDays,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CheckTextLen("standard", c.Standard); err != nil {
+		return nil, err
 	}
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO clients (tenant_id, id, name, tier, kind, color, expected_touch_days, version, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-			c.TenantID, c.ID, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.Version, c.CreatedAt, c.UpdatedAt); err != nil {
+			INSERT INTO clients (tenant_id, id, name, tier, kind, color, standard, expected_touch_days, version, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			c.TenantID, c.ID, c.Name, c.Tier, c.Kind, c.Color, c.Standard, c.ExpectedTouchDays, c.Version, c.CreatedAt, c.UpdatedAt); err != nil {
 			return err
 		}
 		return emit(ctx, tx, clientEvent(domain.EventClientCreated, actorID, &c))
@@ -687,15 +790,15 @@ func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, 
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var c domain.Client
 		err := tx.QueryRow(ctx, `
-			SELECT id::text, tenant_id::text, name, tier, kind, color, expected_touch_days, archived_at, version, created_at, updated_at
+			SELECT id::text, tenant_id::text, name, tier, kind, color, standard, expected_touch_days, archived_at, version, created_at, updated_at
 			FROM clients WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, id, tenantID).
-			Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color,
+			Scan(&c.ID, &c.TenantID, &c.Name, &c.Tier, &c.Kind, &c.Color, &c.Standard,
 				&c.ExpectedTouchDays, &c.ArchivedAt, &c.Version, &c.CreatedAt, &c.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
 		}
 		if err != nil {
-			return err
+			return notFoundOnBadUUID(err)
 		}
 		if expectedVersion != nil && *expectedVersion != c.Version {
 			return domain.ErrConflict
@@ -718,6 +821,12 @@ func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, 
 		if col, ok := patch["color"].(string); ok {
 			c.Color = col
 		}
+		if st, ok := patch["standard"].(string); ok {
+			if err := store.CheckTextLen("standard", st); err != nil {
+				return err
+			}
+			c.Standard = trim(st)
+		}
 		if v, ok := patch["expectedTouchDays"]; ok {
 			n, err := touchDaysPG(v)
 			if err != nil {
@@ -737,8 +846,8 @@ func (s *Store) UpdateClient(ctx context.Context, tenantID, actorID, id string, 
 		// RETURNING updated_at so the response/event carry the trigger-bumped
 		// timestamp (matches the memory adapter, which sets UpdatedAt to now).
 		if err := tx.QueryRow(ctx,
-			`UPDATE clients SET name=$2, tier=$3, kind=$4, color=$5, expected_touch_days=$6, archived_at=$7, version=$8 WHERE id=$1 AND tenant_id=$9 RETURNING updated_at`,
-			id, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.ArchivedAt, c.Version, tenantID).Scan(&c.UpdatedAt); err != nil {
+			`UPDATE clients SET name=$2, tier=$3, kind=$4, color=$5, expected_touch_days=$6, archived_at=$7, version=$8, standard=$10 WHERE id=$1 AND tenant_id=$9 RETURNING updated_at`,
+			id, c.Name, c.Tier, c.Kind, c.Color, c.ExpectedTouchDays, c.ArchivedAt, c.Version, tenantID, c.Standard).Scan(&c.UpdatedAt); err != nil {
 			return err
 		}
 		updated = &c
@@ -755,14 +864,14 @@ func (s *Store) DeleteClient(ctx context.Context, tenantID, actorID, id string) 
 		// projects.client_id is ON DELETE SET NULL, so projects are detached automatically.
 		ct, err := tx.Exec(ctx, `DELETE FROM clients WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 		if err != nil {
-			return err
+			return notFoundOnBadUUID(err)
 		}
 		if ct.RowsAffected() == 0 {
 			return domain.ErrNotFound
 		}
 		return emit(ctx, tx, domain.Event{
 			ID: domain.NewID(), Type: domain.EventClientDeleted, TenantID: tenantID,
-			ActorID: actorID, EntityID: id, At: time.Now().UTC(),
+			ActorID: actorID, EntityType: domain.EntityClient, EntityID: id, At: time.Now().UTC(),
 		})
 	})
 }
@@ -788,6 +897,8 @@ func touchDaysPG(v any) (*int, error) {
 
 // emit writes the event to the outbox in the current transaction. The AFTER
 // INSERT trigger pg_notify()s on commit, so delivery is atomic with the change.
+// New entity types should go through emitEntity (outbox.go) rather than
+// building an Event by hand — and never put bodies or PII in the payload.
 func emit(ctx context.Context, tx pgx.Tx, ev domain.Event) error {
 	payload, err := json.Marshal(ev)
 	if err != nil {
@@ -798,28 +909,98 @@ func emit(ctx context.Context, tx pgx.Tx, ev domain.Event) error {
 		actor = ev.ActorID
 	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO outbox (id, tenant_id, type, entity_id, actor_id, payload)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		domain.NewID(), ev.TenantID, string(ev.Type), ev.EntityID, actor, payload)
+		INSERT INTO outbox (id, tenant_id, type, entity_type, entity_id, actor_id, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		domain.NewID(), ev.TenantID, string(ev.Type), ev.EntityType, ev.EntityID, actor, payload)
 	return err
 }
 
 func taskEvent(t domain.EventType, actorID string, task *domain.Task) domain.Event {
 	cp := *task
-	return domain.Event{ID: domain.NewID(), Type: t, TenantID: task.TenantID, ActorID: actorID, Task: &cp, EntityID: task.ID, At: time.Now().UTC()}
+	return domain.Event{ID: domain.NewID(), Type: t, TenantID: task.TenantID, ActorID: actorID, Task: &cp, EntityType: domain.EntityTask, EntityID: task.ID, At: time.Now().UTC()}
 }
 
 func clientEvent(t domain.EventType, actorID string, c *domain.Client) domain.Event {
 	cp := *c
-	return domain.Event{ID: domain.NewID(), Type: t, TenantID: c.TenantID, ActorID: actorID, Client: &cp, EntityID: c.ID, At: time.Now().UTC()}
+	return domain.Event{ID: domain.NewID(), Type: t, TenantID: c.TenantID, ActorID: actorID, Client: &cp, EntityType: domain.EntityClient, EntityID: c.ID, At: time.Now().UTC()}
 }
 
 func projectEvent(t domain.EventType, actorID string, p *domain.Project) domain.Event {
 	cp := *p
-	return domain.Event{ID: domain.NewID(), Type: t, TenantID: p.TenantID, ActorID: actorID, Project: &cp, EntityID: p.ID, At: time.Now().UTC()}
+	return domain.Event{ID: domain.NewID(), Type: t, TenantID: p.TenantID, ActorID: actorID, Project: &cp, EntityType: domain.EntityProject, EntityID: p.ID, At: time.Now().UTC()}
 }
 
 // ---- small helpers ---------------------------------------------------------
+
+// isInvalidUUID reports whether err is Postgres refusing to read a value as a
+// uuid (SQLSTATE 22P02, invalid_text_representation). A caller-supplied id
+// or filter that is not a uuid can match nothing, so every statement that
+// binds one maps this to the memory adapter's answer — ErrNotFound for an
+// addressed row (notFoundOnBadUUID), no rows for a filter (emptyOnBadUUID) —
+// and never to a 500. Cursors are checked before they reach SQL
+// (store.DecodeCursor).
+func isInvalidUUID(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "22P02"
+}
+
+func notFoundOnBadUUID(err error) error {
+	if isInvalidUUID(err) {
+		return domain.ErrNotFound
+	}
+	return err
+}
+
+func emptyOnBadUUID(err error) error {
+	if isInvalidUUID(err) {
+		return nil
+	}
+	return err
+}
+
+// requireProject / requireClient reject a dangling or cross-tenant reference
+// as a ValidationError (400) before the INSERT/UPDATE, matching the memory
+// adapter's hasProject/hasClient. The tenant-local composite FKs still hold
+// as the backstop; without this check they surface as a raw constraint error
+// (500) instead. nil id = no reference, nothing to check.
+func requireProject(ctx context.Context, tx pgx.Tx, tenantID string, id *string) error {
+	return requireRef(ctx, tx, "projects", "projectId", tenantID, id)
+}
+
+func requireClient(ctx context.Context, tx pgx.Tx, tenantID string, id *string) error {
+	return requireRef(ctx, tx, "clients", "clientId", tenantID, id)
+}
+
+// requireTaskRefs checks every reference a task row carries (project, owner,
+// requirement, waiting-on person) the way requireProject does, matching the
+// memory adapter's checkTaskRefs. created_by has no FK and is not checked.
+func requireTaskRefs(ctx context.Context, tx pgx.Tx, tenantID string, t *domain.Task) error {
+	if err := requireProject(ctx, tx, tenantID, t.ProjectID); err != nil {
+		return err
+	}
+	if err := requireRef(ctx, tx, "users", "ownerId", tenantID, t.OwnerID); err != nil {
+		return err
+	}
+	if err := requireRef(ctx, tx, "requirements", "requirementId", tenantID, t.RequirementID); err != nil {
+		return err
+	}
+	return requireRef(ctx, tx, "users", "waitingOnPersonId", tenantID, t.WaitingOnPersonID)
+}
+
+func requireRef(ctx context.Context, tx pgx.Tx, table, field, tenantID string, id *string) error {
+	if id == nil {
+		return nil
+	}
+	var ok bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+table+` WHERE id = $1 AND tenant_id = $2)`, *id, tenantID).Scan(&ok); err != nil {
+		// A non-uuid id fails the cast; that is the same "not found" to the caller.
+		return domain.Invalid(field, "not found in this workspace")
+	}
+	if !ok {
+		return domain.Invalid(field, "not found in this workspace")
+	}
+	return nil
+}
 
 func trim(s string) string {
 	b, e := 0, len(s)

@@ -53,15 +53,17 @@ func ValidTier(t string) bool {
 	return false
 }
 
-// ClientKind separates external clients from internal initiatives.
+// ClientKind separates external clients from internal initiatives and from
+// PARA areas — ongoing responsibilities held to a standard, with no end date.
 const (
 	ClientExternal = "client"
 	ClientInternal = "internal"
+	ClientArea     = "area"
 )
 
 func ValidClientKind(k string) bool {
 	switch k {
-	case ClientExternal, ClientInternal:
+	case ClientExternal, ClientInternal, ClientArea:
 		return true
 	}
 	return false
@@ -80,4 +82,8 @@ const (
 	EventClientCreated  EventType = "client.created"
 	EventClientUpdated  EventType = "client.updated"
 	EventClientDeleted  EventType = "client.deleted"
+
+	EventRequirementCreated EventType = "requirement.created"
+	EventRequirementUpdated EventType = "requirement.updated"
+	EventRequirementDeleted EventType = "requirement.deleted"
 )

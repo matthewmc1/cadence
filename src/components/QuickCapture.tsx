@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, useActions } from '../state/store';
 import { KINDS, inferTask, bestSlot } from '../lib/energy';
 import { clock } from '../state/selectors';
-
-// ⌘ on Apple platforms, Ctrl elsewhere — the schedule shortcut is meta-or-ctrl.
-const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+import { modalIsOpen, trapTab } from '../lib/focus';
+import { MOD } from '../lib/undo';
 
 /**
  * Global quick-capture omnibox. Cmd/Ctrl+K opens a centered command-palette:
@@ -14,7 +13,7 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
  * full task editor. A strategic spark, captured mid-flow.
  */
 export function QuickCapture() {
-  const { energyProfile } = useApp();
+  const { energyProfile, editorOpen } = useApp();
   const { quickCapture } = useActions();
 
   const [open, setOpen] = useState(false);
@@ -22,32 +21,7 @@ export function QuickCapture() {
   const [important, setImportant] = useState(false);
   const [urgent, setUrgent] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // global hotkey: Cmd/Ctrl+K opens, Escape closes + resets
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setOpen(true);
-      } else if (e.key === 'Escape') {
-        setOpen(false);
-        setTitle('');
-        setImportant(false);
-        setUrgent(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // autofocus the input each time the palette opens
-  useEffect(() => {
-    if (!open) return;
-    const id = window.setTimeout(() => inputRef.current?.focus(), 20);
-    return () => window.clearTimeout(id);
-  }, [open]);
-
-  if (!open) return null;
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const reset = () => {
     setOpen(false);
@@ -55,6 +29,56 @@ export function QuickCapture() {
     setImportant(false);
     setUrgent(false);
   };
+
+  // global hotkey: Cmd/Ctrl+K opens — unless another modal already owns the
+  // screen (the task editor drawer per the store, or any mounted aria-modal
+  // dialog as a belt-and-braces check).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
+      if (editorOpen || modalIsOpen()) return;
+      e.preventDefault();
+      setOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editorOpen]);
+
+  // Keyboard contract while the palette is open: Escape closes it, Tab wraps
+  // inside the panel, and focus that drifts out (a click on the panel's static
+  // text blurs the input to <body>) is pulled back to the input. Listening at
+  // document level rather than on the panel is what makes Escape work from
+  // <body>. It can only ever close the palette: the hotkey refuses to open on
+  // top of another dialog, so no dialog underneath is listening for Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        reset();
+        return;
+      }
+      trapTab(e, panelRef.current);
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      const panel = panelRef.current;
+      if (!panel || (e.target instanceof Node && panel.contains(e.target))) return;
+      inputRef.current?.focus();
+    };
+    // autofocus the input each time the palette opens
+    const id = window.setTimeout(() => inputRef.current?.focus(), 20);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocusIn);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocusIn);
+    };
+    // `reset` is only stable state setters, so re-binding on `open` is enough
+  }, [open]);
+
+  if (!open) return null;
 
   const submit = (schedule: boolean) => {
     if (!title.trim()) return;
@@ -69,6 +93,7 @@ export function QuickCapture() {
   return (
     <div className="qc__backdrop" onMouseDown={reset}>
       <div
+        ref={panelRef}
         className="qc__panel"
         role="dialog"
         aria-modal="true"

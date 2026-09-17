@@ -1,0 +1,1233 @@
+/* ============================================================
+   Work — every item across every project (list), or one
+   project's kanban (board). The old Tasks register, grown into
+   work items: stage, owner, requirement, provenance, waiting.
+   ============================================================ */
+
+.work {
+  padding: var(--gutter-top) var(--gutter) 44px;
+}
+.work__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+/* the same eyebrow + serif h1 as Plan: 26px, tight tracking */
+.work__title {
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 2px 0 0;
+}
+
+/* ---- List | Board switch (same pill as Plan's Week | Month) ---- */
+.work__modes {
+  display: inline-flex;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  flex-shrink: 0;
+}
+.work__mode {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.work__mode.is-on {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+/* ============================================================
+   The doing surface: today's line, then Now / Next / Waiting.
+   The register (filters, columns, board) sits below it behind
+   "the rest". Nothing up here talks about capacity or load —
+   it is about getting through the work, not arranging a day.
+   ============================================================ */
+
+/* ---- today, in one line: the day, without a calendar to visit ---- */
+.work__today {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 16px;
+  margin-bottom: 22px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.work__today-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+  white-space: nowrap;
+}
+.work__today-none {
+  font-size: 12.5px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.work__today-list {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.work__today-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.work__today-time {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.work__today-title {
+  font-size: 12.5px;
+  color: var(--ink);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.work__today-title:hover {
+  color: var(--accent-deep);
+}
+.work__today-item.is-past {
+  opacity: 0.62;
+}
+.work__today-item.is-done .work__today-title {
+  color: var(--ink-4);
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-strike);
+}
+
+/* ---- sections ---- */
+.work__sec {
+  margin-bottom: 24px;
+}
+.work__sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 2px 10px;
+}
+.work__sec-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+.work__sec-n {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--fill);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+.work__sec-note {
+  font-size: 12px;
+  color: var(--ink-5);
+}
+.work__sec-empty {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--ink-4);
+  border: 1px dashed var(--line-dash);
+  border-radius: var(--r-md);
+}
+.work__nowlist,
+.work__tasklist {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---- Now: what is in flight, and the one action that matters ---- */
+.work__now {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px 17px;
+  background: var(--paper);
+  border: 1px solid var(--line-warm);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-warm-sm);
+  cursor: pointer;
+}
+.work__now-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+.work__now-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.work__now-title {
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--ink);
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.work__now-title:hover {
+  color: var(--accent-deep);
+}
+.work__now-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.work__now-dod {
+  color: var(--ink-3);
+}
+.work__now-act {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+.work__done-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 9px 18px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.work__done-btn:hover {
+  background: var(--accent-deep);
+}
+
+/* ---- Next / Waiting: one line each ---- */
+.work__task {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+/* the why · when · where line tucked under a Next / Waiting line */
+.work__task-ctx {
+  padding: 4px 13px 2px 46px;
+}
+.work__task:hover,
+.work__task:focus-within {
+  border-color: var(--line-strong);
+  background: var(--paper);
+}
+.work__task-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.work__task-title:hover {
+  color: var(--accent-deep);
+}
+.work__task-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.work__task-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.work__task-why {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work__task-act {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.work__start {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-pill);
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.work__start:hover {
+  background: var(--accent);
+  color: var(--surface);
+}
+.work__due {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.work__due--soon {
+  color: var(--ink-2);
+  background: var(--fill);
+}
+.work__due--overdue {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+
+/* ---- the "when": a day, one click, no calendar ---- */
+.work__when-pick {
+  position: relative;
+  display: inline-flex;
+}
+.work__whenbtn {
+  font-size: 11.5px;
+  color: var(--ink-4);
+  background: transparent;
+  border: 1px dashed var(--line-dash);
+  border-radius: var(--r-pill);
+  padding: 4px 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.work__whenbtn:hover,
+.work__whenbtn[aria-expanded='true'] {
+  color: var(--ink-2);
+  border-color: var(--ink-4);
+}
+.work__whenbtn.is-set {
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border-style: solid;
+  border-color: var(--line);
+}
+.work__whenmenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 1px;
+  min-width: 172px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-warm-sm);
+}
+/* rows near the bottom of the scrolling register drop upward instead of clipping */
+.work__whenmenu--up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.work__whenitem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.work__whenitem:hover {
+  background: var(--fill);
+}
+.work__whenitem--date input {
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 5px;
+  outline: none;
+}
+.work__whenitem--clear {
+  color: var(--accent-deep);
+}
+.work__whenhint {
+  font-size: 11px;
+  color: var(--ink-5);
+}
+
+/* ---- the rest: the register and the board, one disclosure down ---- */
+.work__rest {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
+}
+.work__rest-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.work__rest-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 7px 15px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.work__rest-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.work__rest-caret {
+  font-size: 10px;
+  color: var(--ink-5);
+}
+
+/* ---- projects drill-in row ---- */
+.work__projects {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line-3);
+  scrollbar-width: thin;
+}
+.work__projects-label {
+  align-self: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.work__pcard {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 168px;
+  padding: 9px 12px 8px;
+  text-align: left;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.work__pcard:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+.work__pcard.is-on {
+  border-color: var(--accent);
+  background: var(--paper);
+  box-shadow: var(--shadow-warm-sm);
+}
+.work__pcard--all {
+  min-width: 0;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.work__pcard-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.work__pcard-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.work__pcard-client {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.work__pcard-track {
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
+}
+.work__pcard-fill {
+  display: block;
+  height: 100%;
+  background: var(--sage);
+  border-radius: 2px;
+  transition: width var(--dur) var(--ease);
+}
+.work__pcard-n {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.work__pcard-unit {
+  font-weight: 500;
+  color: var(--ink-5);
+}
+.work__padd {
+  align-self: center;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px dashed var(--line-dash);
+  border-radius: var(--r-pill);
+  padding: 6px 13px;
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.work__padd:hover {
+  color: var(--ink);
+  border-color: var(--ink-4);
+}
+.work__pnew {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.work__pnew-input {
+  font-size: 13px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-pill);
+  padding: 6px 13px;
+  background: var(--paper);
+  color: var(--ink);
+  outline: none;
+  width: 160px;
+}
+.work__pnew-go {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 7px 14px;
+}
+
+/* ---- summary strip ---- */
+.work__summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.work__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 92px;
+  padding: 12px 15px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.work__metric-n {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+}
+.work__metric-l {
+  font-size: 11.5px;
+  color: var(--ink-4);
+  letter-spacing: 0.02em;
+}
+.work__metric--risk {
+  cursor: pointer;
+  border-color: rgba(194, 116, 61, 0.4);
+  background: var(--fill-warm);
+  transition: border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.work__metric--risk:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.work__metric--risk .work__metric-n {
+  color: var(--accent-deep);
+}
+.work__metric--risk.is-clear {
+  background: var(--paper-2);
+  border-color: var(--line-2);
+}
+.work__metric--risk.is-clear .work__metric-n {
+  color: #4e5e45; /* sage as TEXT: the chip foreground, not the pale accent */
+}
+
+/* ---- filters ---- */
+.work__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 15px 16px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  margin-bottom: 16px;
+}
+.work__filters-primary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.work__filters-chips {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.work__chipset {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.work__divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 22px;
+  background: var(--line);
+}
+.work__search {
+  flex: 1 1 240px;
+  min-width: 180px;
+  max-width: 460px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 8px 14px;
+  outline: none;
+}
+.work__search:focus {
+  border-color: var(--accent);
+}
+.work__select {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 7px 10px;
+  outline: none;
+}
+.work__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 5px 11px;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.work__chip:hover {
+  border-color: var(--line-strong);
+}
+.work__chip[aria-pressed='true'] {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+/* stage chips take their stage's tint when pressed, so the filter reads like the column */
+.work__chip--doing[aria-pressed='true'] {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+  border-color: var(--accent);
+}
+.work__chip--waiting[aria-pressed='true'] {
+  color: #41566a;
+  background: var(--fill-admin);
+  border-color: var(--slate);
+}
+.work__chip--done[aria-pressed='true'] {
+  color: #4e5e45;
+  background: var(--fill-sage);
+  border-color: var(--sage);
+}
+.work__filters-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.work__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.work__group select {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 6px 9px;
+  outline: none;
+}
+/* ---- columns menu: which of the 14 columns the register shows ---- */
+.work__cols {
+  position: relative;
+}
+.work__colsbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 6px 11px;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.work__colsbtn:hover,
+.work__colsbtn[aria-expanded='true'] {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.work__colsbtn-n {
+  font-size: 11px;
+  color: var(--ink-5);
+}
+.work__colsmenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 1px;
+  min-width: 168px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-warm-sm);
+}
+.work__colsitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  padding: 5px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.work__colsitem:hover {
+  background: var(--fill);
+}
+.work__colsitem.is-locked {
+  color: var(--ink-5);
+  cursor: default;
+}
+.work__colsitem input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.work__clear {
+  font-size: 12px;
+  color: var(--accent-deep);
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+}
+.work__clear:hover {
+  text-decoration: underline;
+}
+.work__count {
+  font-size: 12px;
+  color: var(--ink-4);
+  margin: 0 2px 8px;
+}
+.work__count b {
+  color: var(--ink);
+}
+
+/* ---- table ---- */
+.work__tablewrap {
+  overflow: auto;
+  /* bound the height so THIS element scrolls (both axes) — that's what the
+     sticky header pins against; without a max-height the ancestor scrolls and
+     the sticky top:0 would be inert. */
+  max-height: 68vh;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.work__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  /* floor for the default eight columns — they fit a 13" laptop without
+     scrolling sideways; turning more on scrolls this wrapper, never the page */
+  min-width: 940px;
+}
+.work__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 0;
+  white-space: nowrap;
+  user-select: none;
+}
+/* the sort control is a real button (a tab stop) that inherits the th's look
+   and fills the whole cell — every pixel that shows a pointer sorts */
+.work__th-btn {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.work__th-btn:hover {
+  color: var(--ink-2);
+}
+.work__arrow {
+  color: var(--accent);
+  font-weight: 700;
+}
+.tk-num {
+  text-align: right;
+}
+.work__grouprow th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
+  background: var(--fill);
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+.work__group-n {
+  color: var(--ink-5);
+  font-weight: 500;
+  margin-left: 4px;
+}
+.work__row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-2);
+  transition: background var(--dur) var(--ease);
+}
+.work__row:last-child {
+  border-bottom: none;
+}
+.work__row:hover,
+.work__row:focus-within {
+  background: var(--fill);
+}
+.work__row--done .work__title-btn {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-strike);
+}
+.work__table td {
+  padding: 9px 12px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.work__c-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+}
+.work__title-btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.work__title-btn:hover {
+  color: var(--accent-deep);
+}
+/* the row's one tab stop: the global :focus-visible ring, pulled in a touch so
+   it hugs the text rather than colliding with the kind dot beside it */
+.work__title-btn:focus-visible {
+  outline-offset: 1px;
+  color: var(--accent-deep);
+}
+.work__recur {
+  color: var(--ink-5);
+  font-size: 12px;
+}
+.work__muted {
+  color: var(--ink-5);
+}
+.work__client {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+}
+.work__tier {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--ink-5);
+  background: var(--paper-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.work__kind {
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--r-pill);
+  padding: 3px 9px;
+}
+
+/* stage: to do is quiet paper, doing is terracotta, waiting is slate, done is sage */
+.work__stage {
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--r-pill);
+  padding: 3px 9px;
+}
+.work__stage--todo {
+  color: var(--ink-3);
+  background: var(--paper-2);
+}
+.work__stage--doing {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+.work__stage--waiting {
+  color: #41566a;
+  background: var(--fill-admin);
+}
+.work__stage--done {
+  color: #4e5e45;
+  background: var(--fill-sage);
+}
+
+/* owner / waiting-on avatars */
+.work__owner,
+.work__wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.work__avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--surface);
+  flex-shrink: 0;
+}
+.work__avatar--unknown {
+  background: var(--tan);
+}
+.work__owner-you {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.work__wait-reason {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.work__wait-days {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #41566a;
+  background: var(--fill-admin);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.work__wait-days.is-long {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+
+/* why: the requirement it serves, or an explicit "unscoped" — never a silent blank */
+.work__why {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.work__why.is-met {
+  color: var(--ink-4);
+}
+.work__why-check {
+  color: var(--sage);
+  font-size: 11px;
+  font-weight: 700;
+}
+.work__unscoped {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--accent-deep);
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+}
+
+/* from: the link icon with the number of signals behind the item */
+.work__origins {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-5);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.work__origins.has-some {
+  color: var(--ink-2);
+}
+.work__origins:hover {
+  color: var(--accent-deep);
+  border-color: var(--line);
+  background: var(--paper);
+}
+
+.work__prio {
+  display: inline-flex;
+  gap: 4px;
+}
+.work__flag {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+/* 10px text needs the deep foregrounds (--accent / --sage are fills, not text) */
+.work__flag--imp {
+  color: #4e5e45;
+  background: var(--fill-sage);
+}
+.work__flag--urg {
+  color: var(--accent-deep);
+  background: var(--fill-warm);
+}
+.work__deadline {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.work__deadline.is-overdue {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+.work__empty {
+  padding: 40px 20px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--ink-4);
+}
+.work__link {
+  color: var(--accent-deep);
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+.work__link:hover {
+  text-decoration: underline;
+}
+
+/* ---- narrow screens: gutters come from the tokens; controls grow to thumbs ---- */
+@media (max-width: 860px) {
+  .work {
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
+  }
+  .work__head {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .work__pcard {
+    min-width: 148px;
+  }
+  .work__mode,
+  .work__chip,
+  .work__select,
+  .work__group select,
+  .work__colsbtn,
+  .work__padd,
+  .work__pcard--all {
+    min-height: 40px;
+  }
+  .work__colsitem {
+    min-height: 40px;
+  }
+  .work__search {
+    min-height: 44px;
+    max-width: none;
+  }
+  .work__filters {
+    padding: 12px;
+  }
+  .work__filters-right {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .work__metric {
+    flex: 1 1 calc(33.333% - 7px);
+    min-width: 0;
+  }
+  .work__tablewrap {
+    max-height: none; /* the page scrolls; the table scrolls sideways inside it */
+  }
+  /* the doing surface: actions grow to thumbs and drop onto their own line */
+  .work__done-btn,
+  .work__start,
+  .work__whenbtn,
+  .work__rest-toggle {
+    min-height: 40px;
+  }
+  .work__now,
+  .work__task {
+    flex-wrap: wrap;
+  }
+  .work__now-act,
+  .work__task-act {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .work__task-meta {
+    flex-basis: 100%;
+  }
+  .work__table td {
+    padding: 12px 12px;
+  }
+}
+@media (max-width: 560px) {
+  .work__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .work__modes {
+    align-self: flex-start;
+  }
+  .work__title {
+    font-size: 23px;
+  }
+}

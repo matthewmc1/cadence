@@ -2,7 +2,7 @@ import '../styles/ai.css';
 import { useEffect, useState } from 'react';
 import { useApp, useActions } from '../state/store';
 import { LLM_MODELS, WEBLLM_MODELS, OLLAMA_MODELS, loadSavedModel, saveModel, modelKey, type LlmModelOption } from '../ai/config';
-import { loadLlm, webgpuAvailable, ollamaAvailable, ollamaList } from '../ai/llm';
+import { loadLlm, webgpuAvailable, aiStatus, activeModel, ollamaHasModel, webllmArtifactSource, type AiStatus } from '../ai/llm';
 import { scheduleBacklog } from '../ai/scheduler';
 
 type Phase = 'idle' | 'loading' | 'thinking' | 'error';
@@ -31,20 +31,21 @@ export function AiSchedule() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const [ollamaUp, setOllamaUp] = useState<boolean | null>(null);
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  // null = still asking the server what it offers
+  const [status, setStatus] = useState<AiStatus | null>(null);
 
   useEffect(() => {
     let alive = true;
-    void ollamaAvailable().then(async (up) => {
-      if (!alive) return;
-      setOllamaUp(up);
-      if (up) setOllamaModels(await ollamaList());
+    void aiStatus().then((st) => {
+      if (alive) setStatus(st);
     });
     return () => {
       alive = false;
     };
   }, []);
+
+  const ollama = status?.ollama;
+  const ollamaUp = ollama ? ollama.configured && ollama.reachable : null;
 
   const busy = phase === 'loading' || phase === 'thinking';
 
@@ -61,7 +62,7 @@ export function AiSchedule() {
     try {
       setPhase('loading');
       setProgress(0);
-      setMsg(model.backend === 'webllm' ? 'Loading model…' : 'Connecting to Ollama…');
+      setMsg(model.backend === 'webllm' ? 'Loading model…' : 'Connecting to Ollama via the server…');
       await loadLlm(model, (text, ratio) => {
         setMsg(text);
         if (typeof ratio === 'number') setProgress(ratio);
@@ -84,7 +85,20 @@ export function AiSchedule() {
     }
   };
 
-  const installed = (m: LlmModelOption) => ollamaModels.some((n) => n === m.model || n.startsWith(m.model.split(':')[0]));
+  const installed = (m: LlmModelOption) => ollamaHasModel(ollama?.models ?? [], m.model);
+  const hostedLocally = (m: LlmModelOption) => !!status?.webllm.localModels && status.webllm.models.includes(m.model);
+
+  // Where WebLLM weights come from: the server (nothing external) or the
+  // upstream CDN on first use. Once this model has loaded we report what
+  // actually happened — server hosting only works when the loader can reach it.
+  const loaded = activeModel();
+  const weightsFromServer =
+    loaded && loaded.backend === 'webllm' && loaded.model === model.model ? webllmArtifactSource() === 'server' : hostedLocally(model);
+  const webllmNote = !status
+    ? 'checking…'
+    : weightsFromServer
+      ? 'weights are served by your Cadence server'
+      : 'weights are fetched from HuggingFace on first use unless the server hosts them';
 
   return (
     <div className="ai">
@@ -113,16 +127,24 @@ export function AiSchedule() {
 
       {open && (
         <div className="ai__pop" role="menu">
-          <div className="ai__pop-head">Scheduling model — runs on your device</div>
+          <div className="ai__pop-head">Scheduling model — runs on your device or your own server</div>
           <div className="ai__group">
             In-browser · WebGPU{!webgpu && <span className="ai__group-warn"> · unavailable here</span>}
           </div>
           {WEBLLM_MODELS.map((m) => (
-            <ModelRow key={modelKey(m)} m={m} on={modelKey(m) === modelKey(model)} disabled={!webgpu} onPick={() => pick(m)} />
+            <ModelRow
+              key={modelKey(m)}
+              m={m}
+              on={modelKey(m) === modelKey(model)}
+              disabled={!webgpu}
+              note={hostedLocally(m) ? 'hosted here' : undefined}
+              onPick={() => pick(m)}
+            />
           ))}
           <div className="ai__group">
-            Local server · Ollama
-            {ollamaUp === false && <span className="ai__group-warn"> · not running</span>}
+            Ollama · via server
+            {status && !ollama?.configured && <span className="ai__group-warn"> · not configured</span>}
+            {ollama?.configured && !ollama.reachable && <span className="ai__group-warn"> · unreachable</span>}
             {ollamaUp === null && <span className="ai__group-warn"> · checking…</span>}
           </div>
           {OLLAMA_MODELS.map((m) => (
@@ -135,7 +157,10 @@ export function AiSchedule() {
               onPick={() => pick(m)}
             />
           ))}
-          <div className="ai__pop-foot">{LLM_MODELS.length} models · nothing leaves your machine</div>
+          <div className="ai__pop-foot">
+            {LLM_MODELS.length} models · in-browser {webllmNote} · Ollama prompts go only to your Cadence server
+            {status?.policy === 'local+cloud' && ' · cloud policy on (no cloud provider wired yet)'}
+          </div>
         </div>
       )}
     </div>

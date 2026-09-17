@@ -26,6 +26,16 @@ func (s *Store) ConsumeLoginToken(_ context.Context, tokenHash string) (string, 
 	return t.email, nil
 }
 
+func (s *Store) FindAccount(_ context.Context, email string) (domain.Account, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	acc, ok := s.accounts[email]
+	if !ok {
+		return domain.Account{}, domain.ErrNotFound
+	}
+	return acc, nil
+}
+
 func (s *Store) FindOrCreateAccount(_ context.Context, email string) (domain.Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

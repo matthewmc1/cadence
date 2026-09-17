@@ -1,16 +1,13 @@
-import type { Task as NTask, Project as NProject, Client as NClient, ClientTier, ClientKind } from '../api/types';
-import type { TodayItem, WeekDay, MonthGrid, MonthDay, PlacedTask, BacklogTask, Project, BoardTask, BoardColumn } from './types';
+import type { Task as NTask, Project as NProject, Client as NClient, Signal as NSignal, Requirement as NRequirement, SignalKind, Stage, ClientTier, ClientKind } from '../api/types';
+import type { TodayItem, WeekDay, MonthGrid, MonthDay, PlacedTask, BacklogTask, Project, BoardTask, BoardColumn, InboxBundle } from './types';
 import { KINDS, WEEK_MODEL, DEFAULT_PROFILE, type Kind, type EnergyProfile } from '../lib/energy';
-import { occurrences, hourOf, sameDay, addDays, startOfWeek, startOfMonth, monthLabel, ymd } from '../lib/time';
+import { occurrences, hourOf, sameDay, addDays, startOfWeek, startOfMonth, monthLabel, ymd, clock } from '../lib/time';
 
 /* ------------------------------------------------------------- formatters */
 
-export function clock(hour: number): string {
-  const h = Math.floor(hour);
-  const m = Math.round((hour - h) * 60);
-  const h12 = ((h + 11) % 12) + 1;
-  return `${h12}:${m.toString().padStart(2, '0')}`;
-}
+// The clock label lives with the other time helpers; re-exported here because
+// every surface reaches for it alongside these formatters.
+export { clock } from '../lib/time';
 
 export function effortLabel(min: number): string {
   if (min >= 60) {
@@ -94,6 +91,7 @@ function placedFor(tasks: NTask[], dayStart: Date, weekend: boolean): PlacedTask
         title: t.title,
         kind: t.kind,
         hour: hourOf(occ),
+        effortMinutes: t.effortMinutes,
         weekend,
         recurring: t.recurrence !== 'none',
         assignees: assigneesOf(t),
@@ -171,6 +169,7 @@ export function selectBacklog(tasks: NTask[], projects: NProject[] = []): Backlo
         urgent: t.urgent,
         important: t.important,
         effortHrs: t.effortMinutes / 60,
+        projectId: t.projectId,
         project: proj ? { name: proj.name, color: proj.color } : undefined,
       };
     });
@@ -226,6 +225,29 @@ export function selectProject(tasks: NTask[], project: NProject | undefined): Pr
     deepLeft,
     tasks: boardTasks,
   };
+}
+
+/**
+ * A project's progress, in requirements where it has any (met / total, dropped
+ * ones excluded) and in tasks done otherwise — so a project scoped by what it
+ * must deliver is measured by that, not by how many tickets closed.
+ */
+export interface ProjectProgress {
+  unit: 'requirements' | 'tasks';
+  done: number;
+  total: number;
+  pct: number;
+}
+
+export function selectProjectProgress(projectId: string, tasks: Pick<NTask, 'projectId' | 'status'>[], requirements: NRequirement[]): ProjectProgress {
+  const reqs = requirements.filter((r) => r.projectId === projectId && !r.archivedAt && r.status !== 'dropped');
+  if (reqs.length) {
+    const done = reqs.filter((r) => r.status === 'met').length;
+    return { unit: 'requirements', done, total: reqs.length, pct: Math.round((done / reqs.length) * 100) };
+  }
+  const items = tasks.filter((t) => t.projectId === projectId);
+  const done = items.filter((t) => t.status === 'done').length;
+  return { unit: 'tasks', done, total: items.length, pct: items.length ? Math.round((done / items.length) * 100) : 0 };
 }
 
 /* -------------------------------------------------------------- Insights */
@@ -294,11 +316,8 @@ const LOC_META: Record<string, { label: string; color: string }> = {
   Cafe: { label: 'Café', color: '#94A08A' },
 };
 
-function hourLabel(h: number): string {
-  const h12 = ((h + 11) % 12) + 1;
-  const ampm = h >= 12 ? ' PM' : ' AM';
-  return `${h12}:00${ampm}`;
-}
+// the Insights axis reads like every other time in the app: 24-hour
+const hourLabel = (h: number): string => clock(h);
 
 /** Compute Insights purely from completed (`done`) tasks — no mock data. */
 export function computeInsights(tasks: NTask[]): Insights {
@@ -357,8 +376,8 @@ export function computeInsights(tasks: NTask[]): Insights {
     hours: INSIGHT_HOURS,
     grid,
     total,
-    peak: { label: `${hourLabel(peakStart).replace(' AM', '').replace(' PM', '')} – ${hourLabel(peakStart + 2)}`, share: Math.round((peakCount / Math.max(1, total)) * 100) },
-    dip: { label: `${hourLabel(dipHour).replace(' AM', '').replace(' PM', '')} – ${hourLabel(dipHour + 1)}` },
+    peak: { label: `${hourLabel(peakStart)} – ${hourLabel(peakStart + 2)}`, share: Math.round((peakCount / Math.max(1, total)) * 100) },
+    dip: { label: `${hourLabel(dipHour)} – ${hourLabel(dipHour + 1)}` },
     locations,
     heroDay,
     adminDay,
@@ -422,8 +441,9 @@ export function computeSignals(tasks: NTask[], projects: NProject[], clients: NC
   const weekEnd = addDays(weekStart, 7);
 
   // 1) important, non-urgent work aging unscheduled in the backlog — the exact
-  //    long-horizon work that gets crowded out. Flag it, and note if urgent
-  //    work is currently occupying the peak it should be in.
+  //    long-horizon work that gets crowded out. Flag it, and note when urgent
+  //    work is what keeps taking the hours it needs. (The prime-hours check is
+  //    still the trigger; the card itself just says "pick this up".)
   const urgentInPeak = tasks.some((t) => {
     if (t.status === 'done' || !t.urgent || !t.scheduledAt) return false;
     return occurrences(t.scheduledAt, t.recurrence, weekStart, weekEnd).some((d) => {
@@ -436,13 +456,13 @@ export function computeSignals(tasks: NTask[], projects: NProject[], clients: NC
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   slipping.slice(0, 2).forEach((t, i) => {
     const age = dSince(new Date(t.createdAt).getTime()); // always ≥ SLIP_AGING_DAYS (3), so plural
-    // only the first (oldest) card carries the peak-contention note, to avoid repeating it
-    const peakNote = i === 0 && urgentInPeak ? ', while urgent work fills your peak this week' : '';
+    // only the first (oldest) card carries the contention note, to avoid repeating it
+    const peakNote = i === 0 && urgentInPeak ? ', while urgent work keeps taking the time' : '';
     out.push({
       id: 'slip:' + t.id,
       kind: 'act',
-      title: `Give “${t.title}” a peak slot`,
-      detail: `Important, not urgent — waiting ${age} days in the backlog${peakNote}.`,
+      title: `Pick up “${t.title}”`,
+      detail: `Important, not urgent — ${age} days in the backlog without a time${peakNote}.`,
       taskId: t.id,
     });
   });
@@ -483,8 +503,8 @@ export function computeSignals(tasks: NTask[], projects: NProject[], clients: NC
     out.push({
       id: 'overload:week',
       kind: 'act',
-      title: 'This week is over your focus budget',
-      detail: `${Math.round(deepHrs * 10) / 10}h of deep work scheduled vs ~${WEEKLY_DEEP_BUDGET_HRS}h you can realistically protect — defer or delegate some.`,
+      title: 'This week is overbooked',
+      detail: `${Math.round(deepHrs * 10) / 10}h of deep work is on the week — more than it usually absorbs. Something will slip: move or drop what can wait.`,
     });
   }
 
@@ -537,6 +557,230 @@ export function selectRecentDone(tasks: NTask[], projects: NProject[] = [], limi
         project: p ? { name: p.name, color: p.color } : undefined,
       };
     });
+}
+
+/* ---------------------------------------------------------- All work (Tasks) */
+
+/**
+ * A flattened, metadata-rich task row for the cross-project Tasks register —
+ * every task with its project and (rolled-up) client resolved, so the view can
+ * filter/sort across the whole workspace without re-joining. `client` is
+ * inherited through the task's project, matching how completions roll up.
+ */
+export interface TaskRow {
+  id: string;
+  title: string;
+  kind: Kind;
+  status: NTask['status'];
+  /** Work-item lifecycle; derived from status for rows an older server sent without one. */
+  stage: Stage;
+  ownerId: string | null;
+  requirementId: string | null;
+  /** The requirement this item serves — its "why" — resolved from bootstrap. */
+  requirement: { title: string; status: NRequirement['status'] } | null;
+  /** No requirement while still open: shown as "unscoped", never a silent null. */
+  unscoped: boolean;
+  waitingOnPersonId: string | null;
+  waitingOnReason: string;
+  waitingOnSince: string | null;
+  definitionOfDone: string;
+  urgent: boolean;
+  important: boolean;
+  priority: number; // Eisenhower score (see priorityScore)
+  effortMinutes: number;
+  scheduledAt: string | null;
+  deadline: string | null;
+  createdAt: string;
+  projectId: string | null;
+  project: { name: string; color: string } | null;
+  clientId: string | null;
+  client: { name: string; color: string; tier: ClientTier } | null;
+  assignees: { initial: string; color: string }[];
+  recurring: boolean;
+  /** How many signals this item came from, counted by the server; undefined on an older one. */
+  originCount: number | undefined;
+  /** Why · when · where, resolved once so every surface says the same thing. */
+  context: ActionContext;
+  /** Its project is in the archive: the item is kept, but belongs on no active surface. */
+  shelved: boolean;
+  /** Every reference attached to the item — what the Projects page gathers as Resources. */
+  links: { label: string; url: string }[];
+}
+
+/**
+ * Why, when and where an action is to be performed. "Why" falls back down the
+ * PARA chain — the requirement it serves, the ask behind it, its project's
+ * outcome, its area's standard — and `whySource` says which rung answered, so
+ * the view can show an inherited why more quietly than an item's own.
+ * "Where" is two things: the context it is done in (`place`) and the tool or
+ * document the work actually happens in (`tool`, the item's first link).
+ */
+export interface ActionContext {
+  why: string | null;
+  whySource: 'requirement' | 'ask' | 'project' | 'area' | null;
+  /** ISO datetime it is planned for, and the date it is due (deadline, else the ask's needed-by). */
+  scheduledAt: string | null;
+  dueAt: string | null;
+  place: string | null;
+  tool: { label: string; url: string } | null;
+  /** Which of the three are unanswered on an open item — what "clarify" means. */
+  missing: ('why' | 'when' | 'where')[];
+}
+
+function toolLabel(l: { label: string; url: string }): string {
+  if (l.label.trim()) return l.label.trim();
+  try {
+    return new URL(l.url).hostname.replace(/^www\./, '');
+  } catch {
+    return l.url;
+  }
+}
+
+export function actionContext(t: NTask, proj: NProject | null, area: NClient | null, req: NRequirement | null): ActionContext {
+  const rungs: [ActionContext['whySource'], string | undefined][] = [
+    ['requirement', req?.title],
+    ['ask', t.ask?.why],
+    ['project', proj?.outcome],
+    ['area', area?.standard],
+  ];
+  const hit = rungs.find(([, v]) => v && v.trim());
+  const link = (t.links ?? []).find((l) => l.url);
+  const dueAt = t.deadline ?? t.askBy ?? null;
+  const place = t.place && t.place.trim() ? t.place.trim() : null;
+  const missing: ActionContext['missing'] = [];
+  if (!hit) missing.push('why');
+  if (!t.scheduledAt && !dueAt) missing.push('when');
+  if (!place && !link) missing.push('where');
+  return {
+    why: hit ? hit[1]!.trim() : null,
+    whySource: hit ? hit[0] : null,
+    scheduledAt: t.scheduledAt,
+    dueAt,
+    place,
+    tool: link ? { label: toolLabel(link), url: link.url } : null,
+    missing: stageOf(t) === 'done' ? [] : missing,
+  };
+}
+
+/** Stage for any task: the server's when present, else the status→stage mapping it uses itself. */
+export function stageOf(t: Pick<NTask, 'status' | 'stage'>): Stage {
+  if (t.stage) return t.stage;
+  return t.status === 'done' ? 'done' : t.status === 'focus' ? 'doing' : 'todo';
+}
+
+export function selectAllTasks(tasks: NTask[], projects: NProject[], clients: NClient[], requirements: NRequirement[] = []): TaskRow[] {
+  const projById = new Map(projects.map((p) => [p.id, p]));
+  const cliById = new Map(clients.map((c) => [c.id, c]));
+  const reqById = new Map(requirements.map((r) => [r.id, r]));
+  return tasks.map((t) => {
+    const proj = t.projectId ? projById.get(t.projectId) ?? null : null;
+    const cli = proj?.clientId ? cliById.get(proj.clientId) ?? null : null;
+    const req = t.requirementId ? reqById.get(t.requirementId) ?? null : null;
+    const stage = stageOf(t);
+    return {
+      id: t.id,
+      title: t.title,
+      kind: t.kind,
+      status: t.status,
+      stage,
+      ownerId: t.ownerId ?? null,
+      requirementId: t.requirementId ?? null,
+      requirement: req ? { title: req.title, status: req.status } : null,
+      unscoped: !t.requirementId && stage !== 'done',
+      waitingOnPersonId: t.waitingOnPersonId ?? null,
+      waitingOnReason: t.waitingOnReason ?? '',
+      waitingOnSince: t.waitingOnSince ?? null,
+      definitionOfDone: t.definitionOfDone ?? '',
+      urgent: t.urgent,
+      important: t.important,
+      priority: priorityScore(t),
+      effortMinutes: t.effortMinutes,
+      scheduledAt: t.scheduledAt,
+      deadline: t.deadline,
+      createdAt: t.createdAt,
+      projectId: t.projectId,
+      project: proj ? { name: proj.name, color: proj.color } : null,
+      clientId: proj?.clientId ?? null,
+      client: cli ? { name: cli.name, color: cli.color, tier: cli.tier } : null,
+      assignees: assigneesOf(t),
+      recurring: t.recurrence !== 'none',
+      originCount: t.originCount,
+      context: actionContext(t, proj, cli, req),
+      shelved: proj?.archivedAt != null,
+      links: (t.links ?? []).filter((l) => l.url),
+    };
+  });
+}
+
+/* ----------------------------------------------------------------- Inbox */
+
+/** Plural labels for a bundle formed from a signal kind (no project, no participant). */
+const SIGNAL_KIND_LABEL: Record<SignalKind, string> = {
+  meeting: 'Meetings',
+  email: 'Emails',
+  note: 'Notes',
+  doc: 'Documents',
+  chat: 'Chat',
+  link: 'Links',
+  text: 'Captured text',
+};
+
+/** Newest first by (occurredAt, id) — the server's paging order, so a merged page stays in sequence. */
+export function signalOrder(a: NSignal, b: NSignal): number {
+  const at = Date.parse(b.occurredAt) - Date.parse(a.occurredAt);
+  return at !== 0 ? at : b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
+}
+
+/**
+ * Group inbox signals into bundles: by projectHint → project (its client as
+ * the sublabel), else by the first participant, else by the signal's kind.
+ * Bundles and their items are both most-recent-first, so the bundled view is
+ * the flat view folded — never a different set. `people` only lends a colour
+ * when a participant resolves to a known person.
+ */
+export function selectInboxBundles(
+  items: NSignal[],
+  projects: NProject[],
+  clients: NClient[],
+  people: { userId: string; initial: string; color: string }[] = [],
+): InboxBundle<NSignal>[] {
+  const projById = new Map(projects.map((p) => [p.id, p]));
+  const cliById = new Map(clients.map((c) => [c.id, c]));
+  const personById = new Map(people.map((p) => [p.userId, p]));
+  const bundles = new Map<string, InboxBundle<NSignal>>();
+
+  for (const s of items.slice().sort(signalOrder)) {
+    let key: string;
+    let make: () => InboxBundle<NSignal>;
+    const proj = s.projectHint ? projById.get(s.projectHint) : undefined;
+    const who = s.participants[0];
+    if (proj) {
+      const cli = proj.clientId ? cliById.get(proj.clientId) : undefined;
+      key = `project:${proj.id}`;
+      make = () => ({ key, kind: 'project', label: proj.name, sublabel: cli?.name, color: proj.color, items: [] });
+    } else if (who && (who.name || who.email)) {
+      const handle = (who.name || who.email || '').trim();
+      const person = who.personId ? personById.get(who.personId) : undefined;
+      key = `person:${handle.toLowerCase()}`;
+      make = () => ({ key, kind: 'person', label: handle, sublabel: who.name && who.email ? who.email : undefined, color: person?.color, items: [] });
+    } else {
+      key = `kind:${s.kind}`;
+      make = () => ({ key, kind: 'kind', label: SIGNAL_KIND_LABEL[s.kind] ?? s.kind, items: [] });
+    }
+    let b = bundles.get(key);
+    if (!b) {
+      b = make();
+      bundles.set(key, b);
+    }
+    b.items.push(s);
+  }
+  // insertion order already follows the newest item of each bundle
+  return [...bundles.values()];
+}
+
+/** How many inbox signals are beyond the loaded pages — the "and N more" line. */
+export function selectRemainder(count: number, loaded: number): number {
+  return Math.max(0, count - loaded);
 }
 
 /* --------------------------------------------------------------- Clients */

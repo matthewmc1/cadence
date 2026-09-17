@@ -9,12 +9,13 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  padding: 26px 36px 18px;
+  padding: var(--gutter-top) var(--gutter) 18px;
   border-bottom: 1px solid var(--line);
 }
 .plan__title {
-  font-size: 23px;
+  font-size: 26px;
   font-weight: 500;
+  line-height: 1.2;
   margin: 2px 0 0;
   letter-spacing: -0.01em;
 }
@@ -133,7 +134,7 @@
 .plan__monthwrap {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 18px 26px 24px;
+  padding: 18px var(--gutter) 24px 26px;
   display: flex;
   flex-direction: column;
   overflow: auto;
@@ -321,21 +322,31 @@
   margin-top: 14px;
 }
 .rail__item {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 5px;
+  position: relative;
   background: var(--paper-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   padding: 11px 13px;
-  text-align: left;
   transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.rail__item-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
 }
 .rail__item-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-right: 20px; /* reserve room for the hover edit button */
 }
 .rail__item:hover {
   transform: translateX(2px);
@@ -377,11 +388,41 @@
   cursor: not-allowed;
 }
 
+/* ---- Today, at the top of the week ---- */
+.plan__today {
+  max-width: 720px;
+  margin-bottom: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+.plan__today-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+.plan__today-h {
+  font-size: 19px;
+  font-weight: 500;
+  margin: 2px 0 0;
+  letter-spacing: -0.01em;
+}
+.plan__today-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  padding-bottom: 3px;
+}
+
 /* ---- week grid ---- */
 .plan__gridwrap {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 26px 26px 0;
+  padding: 26px var(--gutter) 0 26px;
   display: flex;
   flex-direction: column;
   overflow: auto;
@@ -568,13 +609,167 @@
 @media (max-width: 860px) {
   .plan {
     flex-direction: column;
+    overflow: auto; /* stacked, the whole plan scrolls as one page */
+  }
+  .plan__subhead {
+    flex-wrap: wrap;
+  }
+  .plan__weeklabel {
+    min-width: 0;
+  }
+  .plan__arrow,
+  .plan__mode,
+  .plan__todaybtn {
+    min-height: 40px;
   }
   .plan__rail {
-    flex-basis: auto;
+    flex: 0 0 auto;
     border-right: none;
     border-bottom: 1px solid var(--line);
+    padding: 22px var(--gutter);
+    overflow: visible;
+  }
+  .plan__gridwrap,
+  .plan__monthwrap {
+    flex: 0 0 auto;
+    padding: 22px var(--gutter) calc(24px + env(safe-area-inset-bottom));
+    overflow: auto; /* the 7-day grid keeps its 720px and scrolls sideways in here, not the page */
+  }
+  .plan__month {
+    min-height: 0;
+  }
+  .plan__mday {
+    min-height: 64px;
+    padding: 4px 4px 3px;
+  }
+  /* the footer sits outside the scrolling .plan, so it becomes a pinned strip on the gutter */
+  .plan__footer {
+    margin-top: 0;
+    padding: 10px var(--gutter) calc(12px + env(safe-area-inset-bottom));
+    gap: 6px 14px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
   }
   .rail__auto {
     margin-top: 18px;
   }
+}
+
+/* ---- interactive calendar: duration blocks, drag + click-to-place ---- */
+.plan__col--place {
+  cursor: copy;
+}
+.plan__task--block {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 3px;
+  padding: 5px 8px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none; /* pointer drag shouldn't scroll the page */
+}
+.plan__task--block:active {
+  cursor: grabbing;
+}
+.plan__task-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.plan__task-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.plan__task-time {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-4);
+}
+.plan__task--dragging {
+  pointer-events: none;
+}
+
+.plan__ghost {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border-radius: var(--r-xs);
+  background: rgba(194, 116, 61, 0.13);
+  border: 1.5px dashed var(--accent);
+  overflow: hidden;
+}
+.plan__ghost--place {
+  background: rgba(194, 116, 61, 0.08);
+}
+.plan__ghost-time {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-deep);
+}
+.plan__ghost-title {
+  font-size: 11px;
+  color: var(--accent-deep);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan__hint-cal {
+  margin-top: 12px;
+  padding-left: 2px;
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+/* ---- rail: quick edit + project reassignment ---- */
+.rail__item-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  font-size: 12px;
+  color: var(--ink-5);
+  background: transparent;
+  border: none;
+  padding: 2px 5px;
+  border-radius: 6px;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.rail__item:hover .rail__item-edit,
+.rail__item:focus-within .rail__item-edit {
+  opacity: 1;
+}
+.rail__item-edit:hover {
+  background: var(--fill-warm);
+  color: var(--accent-deep);
+}
+.rail__sel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.rail__sel-edit {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 4px 11px;
+  transition: border-color var(--dur) var(--ease);
+}
+.rail__sel-edit:hover {
+  border-color: var(--line-strong);
 }

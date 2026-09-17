@@ -20,6 +20,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if boot.Projects == nil {
 		boot.Projects = []domain.Project{}
 	}
+	if boot.Requirements == nil {
+		boot.Requirements = []domain.Requirement{}
+	}
 	if boot.Tasks == nil {
 		boot.Tasks = []domain.Task{}
 	}
